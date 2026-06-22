@@ -1,0 +1,3425 @@
+---
+title: "Cover crop weeds GROW 2026"
+author: "L Sencenbaugh"
+date: "2026-06-22"
+output: html_document
+---
+
+An analytical framework for identifying context dependent weed responses to cover crop surface residues  
+
+
+Below code is the analytical framework applied in above paper. 
+
+*blurb about what we're doing*
+
+
+Required packages
+
+```{r, install packages, include = FALSE}
+library(plyr) #data organization
+library(dplyr) #data organization
+library(ggplot2) #figures
+library(lme4) #linear mixed effects models
+library(lmerTest) #linear mixed effects models
+library(readr) #importing csv
+library(tidyr) #data organization
+#install.packages("piecewiseSEM")
+library(piecewiseSEM) #piecewise structural equation modeling 
+library(car) #stats
+#install.packages("prettydoc")
+library(prettydoc) #aesthetics 
+library(influence.ME) #influential points
+library(broom.mixed) #random effect figures
+library(effects) #effects plots
+library(ggpubr) #plot stuff
+library(ggeffects) #plot effects
+library(semEff) #sem effects
+library(Gmisc) #plot stuff
+library(scales) #plot stuff
+library(grid) #plot stuff
+library(MuMIn) #pairwise and group comparisons
+library(lattice) # dot plot
+library(merTools) #create confidence intervals from lmer models
+library(performance) #checking aic and r2 values
+```
+
+
+
+#### Import the data
+
+```{r    echo = TRUE, warning = FALSE}
+#setwd("~/CCHIT 2025")
+cchit <- read_csv("biomass_master.csv") 
+cchit <- as.data.frame(cchit)
+
+# setting factors and numbers
+cchit$state <- as.factor(cchit$state)
+cchit$year <- as.factor(cchit$year)
+cchit$plot <- as.factor(cchit$plot)
+cchit$term.trmt <- as.factor(cchit$term.trmt)
+cchit$herb.trmt <- as.factor(cchit$herb.trmt)
+cchit$region <- as.factor(cchit$region)
+cchit$DPP <- as.numeric(cchit$DPP) # days pre plant (negative values, more negative means earlier termination before planting)
+cchit$sy <- interaction(cchit$state, cchit$year) # site year by combining site*year
+cchit$plotID <- as.factor(cchit$plotID)
+
+str(cchit)
+
+cchit <- cchit %>% 
+  dplyr :: rename(ccbm = "cc.bm.kgha", 
+         yield = "yield.kgha", 
+         weedbmh = "weed.bm.harv.kgha", 
+         weedbmt = "weed.bm.term.kgha", 
+         densityh = "density.harv.allspp.m2", 
+         densityt = "density.term.allspp.m2", 
+         sbpop = "soybean.pop.ha") #renaming things because long names make me crazy
+
+# converting biomass in kilograms to megagrams
+cchit$weedbmh_mg <- as.numeric(cchit$weedbmh/1000) 
+cchit$weedbmt_mg <- as.numeric(cchit$weedbmt/1000)
+cchit$ccbm_mg <- as.numeric(cchit$ccbm/1000)
+
+# 4 weeks
+
+itsbeen4weekssinceyoulookedatme <- read_csv("weed count data.csv") 
+
+wap4 <- as.data.frame(itsbeen4weekssinceyoulookedatme)
+
+# setting factors and numbers
+wap4$state <- as.factor(wap4$state)
+wap4$year <- as.factor(wap4$year)
+wap4$block <- as.factor(wap4$block)
+wap4$plot <- as.factor(wap4$plot)
+wap4$term_trmt <- as.factor(wap4$term_trmt)
+wap4$herb_trmt <- as.factor(wap4$herb_trmt)
+wap4$wap <- as.numeric(wap4$wap)  
+wap4$sy <- interaction(wap4$state, wap4$year) # site year by combining site*year
+wap4$plotID <- as.factor(wap4$plotID)
+wap4 <- wap4 %>%
+  filter(!wap == "0") ## same thing as at termination also I think only 1 site year has this
+str(wap4)
+```
+
+```{r}
+wes_palettes <- list(
+  BottleRocket1 = c("#A42820", "#5F5647", "#9B110E", "#3F5151", "#4E2A1E", "#550307", "#0C1707"),
+  BottleRocket2 = c("#FAD510", "#CB2314", "#273046", "#354823", "#1E1E1E"),
+  Rushmore1 = c("#E1BD6D", "#EABE94", "#0B775E", "#35274A" ,"#F2300F"),
+  Rushmore = c("#E1BD6D", "#EABE94", "#0B775E", "#35274A" ,"#F2300F"),
+  Royal1 = c("#899DA4", "#C93312", "#FAEFD1", "#DC863B"),
+  Royal2 = c("#9A8822", "#F5CDB4", "#F8AFA8", "#FDDDA0", "#74A089"),
+  Zissou1 = c("#3B9AB2", "#78B7C5", "#EBCC2A", "#E1AF00", "#F21A00"),
+  Zissou1Continuous = c("#3A9AB2", "#6FB2C1", "#91BAB6", "#A5C2A3", "#BDC881", "#DCCB4E", "#E3B710", "#E79805", "#EC7A05", "#EF5703", "#F11B00"),
+  Darjeeling1 = c("#FF0000", "#00A08A", "#F2AD00", "#F98400", "#5BBCD6"),
+  Darjeeling2 = c("#ECCBAE", "#046C9A", "#D69C4E", "#ABDDDE", "#000000"),
+  Chevalier1 = c("#446455", "#FDD262", "#D3DDDC", "#C7B19C"),
+  FantasticFox1 = c("#DD8D29", "#E2D200", "#46ACC8", "#E58601", "#B40F20"),
+  Moonrise1 = c("#F3DF6C", "#CEAB07", "#D5D5D3", "#24281A"),
+  Moonrise2 = c("#798E87", "#C27D38", "#CCC591", "#29211F"),
+  Moonrise3 = c("#85D4E3", "#F4B5BD", "#9C964A", "#CDC08C", "#FAD77B"),
+  Cavalcanti1 = c("#D8B70A", "#02401B", "#A2A475", "#81A88D", "#972D15"),
+  GrandBudapest1 = c("#F1BB7B", "#FD6467", "#5B1A18", "#D67236"),
+  GrandBudapest2 = c("#E6A0C4", "#C6CDF7", "#D8A499", "#7294D4"),
+  IsleofDogs1 = c("#9986A5", "#79402E", "#CCBA72", "#0F0D0E", "#D9D0D3", "#8D8680"),
+  IsleofDogs2 = c("#EAD3BF", "#AA9486", "#B6854D", "#39312F", "#1C1718"),
+  FrenchDispatch = c("#90D4CC", "#BD3027", "#B0AFA2", "#7FC0C6", "#9D9C85"),
+  AsteroidCity1 = c("#0A9F9D", "#CEB175", "#E54E21", "#6C8645", "#C18748"),
+  AsteroidCity2 = c("#C52E19", "#AC9765", "#54D8B1", "#b67c3b", "#175149", "#AF4E24"),
+  AsteroidCity3 = c("#FBA72A", "#D3D4D8", "#CB7A5C", "#5785C1")
+)
+
+
+wes_yellows <- c("#FAD510", "#E1BD6D", "#9A8822", "#EBCC2A", "#E1AF00", "#E3B710", "#F2AD00", "#FDD262", "#E2D200", "#F3DF6C", "#CEAB07", "#FAD77B", "#FBA72A")
+wes_reds <- c("#A42820", "#9B110E", "#550307", "#CB2314", "#F2300F", "#C93312", "#EF5703", "#F11B00", "#FF0000", "#B40F20", "#972D15", "#FD6467", "#5B1A18", "#BD3027", "#C52E19")
+wes_blues <- c("#273046", "#899DA4", "#35274A", "#3B9AB2", "#78B7C5", "#3A9AB2", "#6FB2C1", "#91BAB6", "#5BBCD6", "#046C9A", "#ABDDDE", "#46ACC8", "#85D4E3", "#7294D4", "#90D4CC", "#7FC0C6", "#0A9F9D", "#5785C1")
+```
+
+Density at 4 weeks
+
+```{r warning = FALSE}
+sum_per <- function(x) {
+  if (all(is.na(x))) NA_real_ else sum(x, na.rm = TRUE)
+}
+
+quadsize <- function(x) {
+  if (all(is.na(x))) NA else first(na.omit(x))
+}
+
+totals <- wap4 %>%
+  dplyr :: group_by(sy, plotID, wap, term_trmt, herb_trmt) %>%
+  dplyr :: summarise(
+    total_ct1 = sum_per(seq_ct_1),
+    total_ct2 = sum_per(seq_ct_2),
+    total_ct3 = sum_per(seq_qt_3 ),
+    quad1_size = quadsize(seq_quad_area_1),
+    quad2_size = quadsize(seq_quad_area_2),
+    quad3_size = quadsize(seq_quad_3),
+    total_perm2_1 = sum_per(Count_per1m_1),
+    total_perm2_2 = sum_per(Count_per1m_2),
+    total_perm2_3 = sum_per(Count_per1m_3),
+    .groups = "drop"
+  )
+
+totals <- as.data.frame(totals)
+
+#making data frame long based on quadrat
+totals <- totals %>% 
+  dplyr :: rename(term.trmt = term_trmt)
+totals <- totals %>%
+  dplyr :: rename(herb.trmt = herb_trmt)
+
+totals_long <- totals %>%
+  pivot_longer(
+    cols = c(total_perm2_1, total_perm2_2),
+    names_to = "quadrat",
+    values_to = "total_perm2"
+  ) %>%
+  dplyr :: mutate(
+    quadrat = ifelse(quadrat == "total_perm2_1", "quad1", "quad2")
+  )
+
+totals_long <- totals_long %>%
+  dplyr :: mutate(across(c(sy, plotID, term.trmt, herb.trmt), as.factor))
+
+totals_long <- as.data.frame(totals_long)
+
+totals_joined <- totals_long %>%
+  left_join(
+    cchit %>% 
+      dplyr::select(sy, plotID, term.trmt, herb.trmt, DPP, ccbm_mg),
+    by = c("sy", "plotID", "term.trmt", "herb.trmt")
+  )
+
+totals_weedy <- totals_joined %>% filter(herb.trmt != "Standard")
+
+str(totals_weedy)
+
+```
+
+Weed density mid-season
+
+```{r warning = FALSE}
+group_means <- totals_weedy %>%
+  dplyr :: group_by(sy, plotID, term.trmt, DPP, ccbm_mg, wap, quadrat) %>%
+  dplyr :: summarise(
+    mean_density = mean(total_perm2, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+ref <- group_means %>% 
+  dplyr :: filter(term.trmt == "No cover") %>% 
+  dplyr :: rename(ref_density = mean_density) %>% 
+  dplyr :: select(sy, plotID, wap, quadrat, ref_density)
+
+group_means <- group_means %>%
+  dplyr :: mutate(block = substr(plotID, 2, 3))  
+ref <- ref %>%
+  dplyr :: mutate(block = substr(plotID, 2, 3))
+
+#rr_density <- group_means %>%
+#  dplyr :: left_join(ref, by = c("sy", "block", "wap", "quadrat"), suffix = c("", "_ref")) %>%
+#  dplyr :: filter(!is.na(ref_density), !is.na(mean_density)) %>%
+#  dplyr :: mutate(
+#    RR = ifelse(ref_density == 0, NA, mean_density / ref_density),
+#    lnRR = log(RR + 0.000001) #psem needs help interpretting log (can't do it within psem code must be done prior)
+#  ) %>%
+ # dplyr::select(-plotID_ref) %>% # keep the main columns tidy 
+  #filter(!is.na(lnRR), !is.infinite(lnRR), !is.nan(lnRR)) 
+
+
+#rr_density <- group_means %>%
+#  dplyr :: left_join(ref, by = "sy", suffix = c("", "_ref")) %>% #idk how to prevent the repeated columns so adding _ref as an id so it can be removed later
+#  dplyr :: filter(!is.na(ref_density), !is.na(mean_density)) %>%
+#  dplyr :: mutate(RR = mean_density / ref_density) %>%
+#  dplyr :: select(-plotID_ref, -block_ref) # keep the main columns tidy
+
+
+rr_density <- group_means %>%
+  left_join(ref, by = c("sy", "block", "wap", "quadrat"), suffix = c("", "_ref")) %>%
+  mutate(
+    RR = mean_density / ref_density,
+    lnRR = log(RR + 0.000001)
+  )
+
+
+rr_density <- as.data.frame(rr_density)
+
+rr_density <- rr_density %>%
+  dplyr :: filter(!(wap < 2), !(wap > 10))
+
+str(rr_density)
+```
+
+
+Density end of season
+
+```{r warning = FALSE}
+cchitnh <- subset(cchit, herb.trmt == "Weedy") # subset out herbicide treated
+cchitnh <- cchitnh %>%
+  dplyr :: mutate(across(c(sy, plotID, term.trmt, herb.trmt), as.factor))
+
+group_means <- cchitnh %>%
+  dplyr :: group_by(state, year, sy, term.trmt, plotID, DPP, ccbm_mg) %>%
+  dplyr :: summarize(
+    mean_biomass = mean(densityh, na.rm = TRUE),
+    .groups = "drop"
+  ) 
+
+
+ref <- group_means %>%
+  dplyr :: filter(term.trmt == "No cover") %>%
+  dplyr :: rename(ref_biomass = mean_biomass) %>%
+   dplyr :: select(sy, plotID, ref_biomass)
+
+group_means <- group_means %>%
+  dplyr :: mutate(block = substr(plotID, 2, 3))  
+ref <- ref %>%
+ dplyr ::  mutate(block = substr(plotID, 2, 3))
+
+
+#rr_data <- group_means %>%
+ # dplyr :: left_join(ref, by = "sy", suffix = c("", "_ref")) %>% #idk how to prevent the repeated columns so adding _ref as an id so it can be removed later
+  #dplyr :: filter(!is.na(ref_biomass), !is.na(mean_biomass)) %>%
+  #dplyr :: mutate(RR = mean_biomass / ref_biomass) %>%
+  #dplyr :: select(-plotID_ref, -block_ref) # keep the main columns tidy
+
+
+rr_data <- group_means %>%
+  left_join(ref, by = "sy", suffix = c("", "_ref")) %>%
+  mutate(
+    RR = mean_biomass / ref_biomass,
+    lnrr1 = log(RR + 0.000001)
+  )
+
+#rr_data[sapply(rr_data, is.infinite)] <- NA
+#rr_data <- na.omit(rr_data)
+
+
+rr_data$RR <- as.numeric(rr_data$RR)
+rr_data <- as.data.frame(rr_data)
+str(rr_data)
+
+rr_data$lnrr1 <- log(rr_data$RR + 0.000001) 
+
+
+
+# why are we losing NC ?
+
+sum(is.nan(group_means$mean_biomass))
+group_means %>%
+  filter(is.nan(mean_biomass))
+ref %>%
+  filter(is.nan(ref_biomass))
+
+# missing data (density)
+
+
+```
+
+Making a new dataset with density at harvest and 4 weeks combined 
+
+```{r}
+rr_data <- rr_data %>%
+  dplyr::rename(lnRR_harvest = lnrr1)
+
+rr_density <- rr_density %>%
+ dplyr:: rename(lnRR_4WAP = lnRR)
+
+rr_data <- rr_data %>%
+ dplyr:: mutate(across(c(sy, plotID, block), as.character))
+
+rr_density <- rr_density %>%
+  dplyr::mutate(across(c(sy, plotID, block), as.character))
+
+rr_density_mean <- rr_density %>%
+dplyr::  group_by(sy, block, DPP, ccbm_mg) %>%
+dplyr::  summarise(lnRR_4WAP = mean(lnRR_4WAP, na.rm = TRUE), .groups = "drop")
+
+final_data <- rr_data %>%
+  dplyr :: left_join(rr_density_mean, by = c("sy", "block", "DPP", "ccbm_mg"))
+
+str(final_data)
+```
+
+
+Removing specific outliers
+```{r, warning = FALSE}
+#x11()
+#plot(final_data$DPP, final_data$lnRR_4WAP, pch=19, cex=2, col="goldenrod")
+
+# identify points
+#idx <- identify(final_data$DPP, final_data$lnRR_4WAP, labels = final_data$plotID)
+
+# confirm
+#final_data[idx, c("plotID", "DPP", "lnRR_harvest")]
+
+# remove by row
+
+#final_data <- subset(final_data, !(final_data$plotID %in% c("M73MW", "D73LW", "V02LW")))
+
+ggplot(final_data, aes(x = DPP, y = lnRR_4WAP, color = state)) +
+  geom_point(size = 2, alpha = 0.4) +
+  geom_smooth(method = "lm", fullrange = TRUE, size = 1, alpha = 0.2) +
+  theme_light()
+```
+
+## Quantity vs Quality
+
+For this PSEM model we have 2 component models
+
+2. weed density 4 weeks after planting ~ cover crop biomass
+1. cover crop biomass ~ days pre plant
+
+
+
+## Table 1 set up
+Scaling DPP and biomass
+
+```{r}
+final_data$ccbm_sc <- scale(final_data$ccbm_mg)
+final_data$DPP_sc  <- scale(final_data$DPP)
+```
+
+```{r}
+
+mod1 <- lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_data, na.action = na.omit) #slope correlated
+mod1a <- lmer(ccbm_sc ~ DPP_sc + (DPP_sc || sy), data = final_data) # uncorrelated random effects
+anova(mod1a, mod1) # correlated is better!
+summary(mod1)
+
+Anova(mod1, type = "III", test = "Chisq")
+```
+
+
+```{r}
+final_data1 <- final_data %>%
+  filter(!is.na(lnRR_4WAP), !is.infinite(lnRR_4WAP), !is.nan(lnRR_4WAP)) 
+
+
+
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_data1, na.action = na.omit) #slope correlated
+mod2a <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_data1) # uncorrelated random effects
+anova(mod2a, mod2) # correlated is better!
+
+
+
+mod2c <- lm(lnRR_4WAP ~ ccbm_sc, data = final_data1 )
+summary(mod2c)
+AIC(mod2c)
+r2(mod2c)
+
+mod2d <- lmer(lnRR_4WAP ~ ccbm_sc + (1 | sy), data = final_data1)
+summary(mod2d)
+AIC(mod2d)
+r2(mod2d)
+
+mod2b <- lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc | sy), data = final_data1) # remove dpp
+summary(mod2b)
+r2(mod2b)
+AIC(mod2b)
+
+mod2e <- lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc || sy), data = final_data1) # remove dpp
+summary(mod2e)
+r2(mod2e)
+AIC(mod2e)
+
+
+anova(mod2b, mod2e)
+
+#anova(mod2b, mod2) # on the edge here
+
+summary(mod2)
+VarCorr(mod2)
+Anova(mod2, type = "III", test.statistic = "Chisq")
+```
+
+## Figure 2 (top)
+Box 1:
+
+```{r}
+rd1 <- broom.mixed::tidy(mod1, effects = "ran_vals", conf.int = TRUE, response = TRUE)
+rd1 <- as.data.frame(rd1) 
+interceptd1 <- subset(rd1, term == "(Intercept)")
+sloped1 <- subset(rd1, term == "DPP_sc")
+sloped1$slope <- sloped1$estimate
+sloped1$slope.low <- sloped1$conf.low
+sloped1$slope.high <- sloped1$conf.high
+df.biplotd1 <- cbind(interceptd1, sloped1$slope, sloped1$slope.low, sloped1$slope.high)
+df.biplotd1 <- as.data.frame(df.biplotd1)
+
+wes_yellows <- c("#FAD510", "#E1BD6D", "#9A8822", "#EBCC2A", "#E1AF00", "#E3B710", "#F2AD00", "#FDD262", "#E2D200", "#F3DF6C", "#CEAB07", "#FAD77B", "#FBA72A")
+wes_reds <- c("#A42820", "#9B110E", "#550307", "#CB2314", "#F2300F", "#C93312", "#EF5703", "#F11B00", "#FF0000", "#B40F20", "#972D15", "#FD6467", "#5B1A18", "#BD3027", "#C52E19")
+wes_blues <- c("#273046", "#899DA4", "#35274A", "#3B9AB2", "#78B7C5", "#3A9AB2", "#6FB2C1", "#91BAB6", "#5BBCD6", "#046C9A", "#ABDDDE", "#46ACC8", "#85D4E3", "#7294D4", "#90D4CC", "#7FC0C6", "#0A9F9D", "#5785C1")
+
+
+figure1b <-
+  ggplot(df.biplotd1, 
+         aes (x = estimate, 
+              y = sloped1$slope, xmin = conf.low, 
+              xmax = conf.high,  
+              ymin = sloped1$slope.low, 
+              ymax = sloped1$slope.high, 
+              fill = level, color = level)) + 
+  geom_hline(yintercept = 0, color = "gray85", size=0.75) +
+  geom_vline(xintercept = 0, color = "gray85", size=0.75) +
+  geom_errorbar(size=0.5, alpha = 0.3) + 
+  geom_errorbarh(size=0.5, alpha = 0.3) + 
+  geom_point(size = 1.5, shape = 21, alpha = 1.0, stroke = 0.8) +
+  labs(x = "Conditional mode (random intercept)",
+       y = "Conditional mode (random slope)", 
+       color = "Site-year", fill = "Site-year") + 
+
+  theme_light () + 
+  scale_color_manual(values = c("#68180D","#68180D", #ar
+                                "#266B7E", "#266B7E", "#266B7E", "#266B7E", #de
+                                "#A18902", "#A18902", "#A18902", "#A18902",#il
+                                "#68180D", "#68180D", "#68180D", #la
+                                "#244D51", "#244D51", "#244D51", #md
+                                "#AE8224", "#AE8224","#AE8224","#AE8224", #mn
+                                "#AE8224", "#AE8224","#AE8224","#AE8224", #mo
+                                "#68180D","#68180D","#68180D", #nc
+                                "#9D8206","#9D8206", "#9D8206", "#9D8206", #ne
+                                "#3F1309",  "#3F1309","#3F1309","#3F1309", #tx
+                                "#266B7E", "#266B7E", "#266B7E", "#266B7E"))+ #va
+  scale_fill_manual(values = c("#B40F20","#B40F20",                            #arkansas
+                               "#7294D4", "#7294D4", "#7294D4", "#7294D4",    # delaware
+                                "#FAD510", "#FAD510", "#FAD510",  "#FAD510",  # illinois
+                                "#C52E19", "#C52E19", "#C52E19",               #louisiana
+                                "#046C9A", "#046C9A", "#046C9A",              #maryland
+                                "#F3DF6C", "#F3DF6C","#F3DF6C","#F3DF6C",     #minnesota
+                                "#FBA72A", "#FBA72A","#FBA72A",  "#FBA72A",    #missouri
+                                "#F11B00","#F11B00","#F11B00",                 #north carolina
+                                "#CEAB07","#CEAB07", "#CEAB07", "#CEAB07",    #nebraska
+                                "#972D15", "#972D15", "#972D15", "#972D15",   # texas
+                                "#85D4E3", "#85D4E3", "#85D4E3", "#85D4E3")) + #virginia
+  theme(
+       axis.text.x = element_text(size=10), 
+        axis.text.y = element_text(size=10),
+        axis.title.y = element_text(size=10), 
+        axis.title.x = element_text(size=10),
+       legend.position = "none",
+       legend.spacing.x = unit(5, "pt"),
+       legend.text = element_text(size = 7),
+       legend.title = element_text(size = 8),
+       legend.key.size = unit(0.5, "cm"),
+       legend.key.spacing.y = unit(0, "pt"),
+       legend.box.margin = margin(-5, -5, -5, -5))+
+  guides(col = guide_legend(nrow = 6, byrow = TRUE, title.position = "top", title.hjust = 0.5))
+ 
+figure1b
+
+#save to make it look really pretty
+ggsave("figure1b.png", width = 6, height = 2.5, units = "in", dpi = 300)
+
+```
+
+## Figure 1 states
+
+
+```{r}
+state_max <- final_data %>%
+  group_by(sy) %>%
+  summarise(max_ccbm = max(ccbm_mg, na.rm = TRUE))
+
+highest_common <- min(state_max$max_ccbm)
+
+#use this for the figure I think??
+state_year_summary <- final_data %>%
+  group_by(state, year) %>%
+  summarise(
+    mean_ccbm = mean(ccbm_mg, na.rm = TRUE),
+    median_ccbm = median(ccbm_mg, na.rm = TRUE),
+    max_ccbm = max(ccbm_mg, na.rm = TRUE),
+    sd_ccbm = sd(ccbm_mg, na.rm = TRUE),
+    n = sum(!is.na(ccbm_mg)),
+    se_ccbm = sd_ccbm / sqrt(n),
+    .groups = "drop"
+  )
+
+#order from low to high by state
+state_order <- state_year_summary %>%
+  group_by(state) %>%
+  summarise(state_mean = mean(mean_ccbm)) %>%
+  arrange(state_mean) %>%
+  pull(state)
+
+state_year_summary$state <- factor(state_year_summary$state,
+                                   levels = state_order)
+
+#removing sy that are not in the model
+state_year_summary$sy <- interaction(state_year_summary$state, state_year_summary$year)
+#state_year_summary <- subset(state_year_summary, !state_year_summary$state == "TX")
+#state_year_summary <- subset(state_year_summary, !(state_year_summary$sy %in% c("DE.2019", "DE.2020", "IL.2017", "MD.2018", "MD.2019", "MD.2020", "MN.2017", "MN.2018", "MN.2020","MO.2018", "NE.2017")))
+```
+
+
+
+```{r}
+#how to make jitter same for the points AND error bars
+
+jit <- position_jitter(width = 0, height = 0.2, seed = 13)
+
+
+yearmax <- ggplot(state_year_summary,
+       aes(x = mean_ccbm, y = state, fill = state, shape = year)) +
+  
+  scale_shape_manual("Year", values = c(21, 22, 23, 24)) +
+  scale_fill_manual("Year", values = c(   "#F3DF6C", "#CEAB07", "#FAD510","#7294D4", "#B40F20","#C52E19","#FBA72A", "#972D15","#F11B00", "#85D4E3", "#046C9A")) + 
+  
+  geom_errorbar(aes(xmin = mean_ccbm - se_ccbm,
+                  xmax = mean_ccbm + se_ccbm),
+              width = 0.3,
+              position = jit) +
+  geom_point(size = 1.7, position = jit) +
+  labs(x = expression(Cover~crop~biomass~(Mg~ha^-1)),
+       y = "State",
+       fill = "state") +
+  scale_x_continuous(limits = c(0, 8))+
+  
+  theme_light() +
+  coord_fixed(ratio = 0.75) +
+  theme(
+       axis.text.x = element_text(size=10), 
+        axis.text.y = element_text(size=10),
+        axis.title.y = element_text(size=10), 
+        axis.title.x = element_text(size=10),
+       legend.position = "none",
+       legend.spacing.x = unit(10, "pt"),
+       legend.text = element_text(size = 8),
+       legend.title = element_text(size = 9),
+       legend.key.size = unit(0.5, "cm"),
+       legend.key.spacing.y = unit(0, "pt"),
+       legend.box.margin = margin(-5, -5, -5, -5))+
+  guides(col = guide_legend(nrow = 3, byrow = TRUE))
+
+
+yearmax
+ggsave("yearaverages.png", width = 3.5, height = 3.5, units = "in", dpi = 300)
+```
+
+
+
+```{r}
+final_data2 <- final_data %>%
+  filter(!is.na(DPP_sc)) 
+
+mod1 <- lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_data2, na.action = na.omit)
+newdat1 <- expand.grid(
+  DPP_sc = seq(min(final_data2$DPP_sc, na.rm = TRUE),
+                max(final_data2$DPP_sc, na.rm = TRUE),
+                length.out = 100),
+  sy = final_data2$sy
+)
+
+newdat1$pred <- predict(mod1, newdata = newdat1,
+                         re.form = NULL,
+                         allow.new.levels = TRUE) # had to add this due to the missing site years in the model (that do show up in the full dataframe)
+
+newdat1$pred_pop <- predict(mod1, newdata = newdat1, re.form = NA)
+```
+
+```{r warning = FALSE}
+pred_int <- predictInterval(
+  mod1,
+  newdata = newdat1,
+  level = 0.95, #seems fine
+  n.sims = 1000, #runs fast?? good enough
+  stat = "mean",
+  include.resid.var = FALSE,
+  which = "fixed"  # we only want the confidence interval for the population line not the site year lines
+)
+
+newdat1$fit   <- pred_int$fit
+newdat1$lwr   <- pred_int$lwr
+newdat1$upr   <- pred_int$upr
+```
+
+```{r}
+figure1a <- ggplot() +
+  # Site-year lines (colored)
+  geom_line(data = newdat1,
+            aes(x = DPP_sc, y = pred, color = sy),
+            size = 0.75, alpha = 0.4) +
+  
+  # Population-level line (black, bold, on top)
+  geom_line(data = newdat1,
+            aes(x = DPP_sc, y = pred_pop),
+            color = "black", size = 1.5) +
+  geom_ribbon(data = newdat1,
+            aes(x = DPP_sc, ymin = lwr, ymax = upr),
+            fill = "gray30", alpha = 0.4) +
+ 
+  scale_color_manual(values = c("#B40F20","#B40F20",                          #arkansas
+                               "#7294D4", "#7294D4", "#7294D4", "#7294D4",    # delaware
+                                "#FAD510", "#FAD510", "#FAD510",  "#FAD510",  # illinois
+                                "#C52E19", "#C52E19", "#C52E19",               #louisiana
+                                "#046C9A", "#046C9A", "#046C9A",              #maryland
+                                "#F3DF6C", "#F3DF6C","#F3DF6C","#F3DF6C",     #minnesota
+                                "#FBA72A", "#FBA72A","#FBA72A",  "#FBA72A",    #missouri
+                                "#F11B00","#F11B00","#F11B00",                 #north carolina
+                                "#CEAB07","#CEAB07", "#CEAB07", "#CEAB07",    #nebraska
+                                "#972D15", "#972D15", "#972D15", "#972D15",   # texas
+                                "#85D4E3", "#85D4E3", "#85D4E3", "#85D4E3")) + #virginia
+  
+  
+  labs(
+    y = "CCSR biomass", 
+    x = "Termination timing", 
+       color = "Site-year") + 
+  theme_light()+
+  theme(
+       axis.text.x = element_text(size=10), 
+        axis.text.y = element_text(size=10),
+        axis.title.y = element_text(size=10), 
+        axis.title.x = element_text(size=10),
+       legend.position = "none")
+
+
+figure1a
+
+#save to make it look really pretty
+#ggsave("figure1a.png", width = 6, height = 6, units = "in", dpi = 300)
+
+figure1 <- ggarrange(figure1a, figure1b)
+figure1
+
+#work out some save details 
+ggsave("figure1.png", width = 6, height = 2.5, units = "in", dpi = 300)
+```
+
+
+
+## Resetting everything without the yucky site years
+
+Weed density mid-season
+
+```{r warning = FALSE}
+group_means <- totals_weedy %>%
+  dplyr :: group_by(sy, plotID, term.trmt, DPP, ccbm_mg, wap, quadrat) %>%
+  dplyr :: summarise(
+    mean_density = mean(total_perm2, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+ref <- group_means %>% 
+  dplyr :: filter(term.trmt == "No cover") %>% 
+  dplyr :: rename(ref_density = mean_density) %>% 
+  dplyr :: select(sy, plotID, wap, quadrat, ref_density)
+
+group_means <- group_means %>%
+  dplyr :: mutate(block = substr(plotID, 2, 3))  
+ref <- ref %>%
+  dplyr :: mutate(block = substr(plotID, 2, 3))
+
+rr_density <- group_means %>%
+  dplyr :: left_join(ref, by = c("sy", "block", "wap", "quadrat"), suffix = c("", "_ref")) %>%
+  dplyr :: filter(!is.na(ref_density), !is.na(mean_density)) %>%
+  dplyr :: mutate(
+    RR = ifelse(ref_density == 0, NA, mean_density / ref_density),
+    lnRR = log(RR + 0.000001) #psem needs help interpretting log (can't do it within psem code must be done prior)
+  ) %>%
+  dplyr::select(-plotID_ref) %>% # keep the main columns tidy 
+  filter(!is.na(lnRR), !is.infinite(lnRR), !is.nan(lnRR)) 
+
+rr_density <- as.data.frame(rr_density)
+
+
+
+str(rr_density)
+```
+Density at harvest
+
+```{r warning = FALSE}
+cchitnh <- subset(cchit, herb.trmt == "Weedy") # subset out herbicide treated
+cchitnh <- cchitnh %>%
+  dplyr::mutate(across(c(sy, plotID, term.trmt, herb.trmt), as.factor))
+
+group_means <- cchitnh %>%
+  dplyr::group_by(state, year, sy, term.trmt, plotID, DPP, ccbm_mg) %>%
+  dplyr::summarize(
+    mean_biomass = mean(densityh, na.rm = TRUE),
+    .groups = "drop"
+  ) 
+
+ref <- group_means %>%
+  dplyr::filter(term.trmt == "No cover") %>%
+  dplyr::rename(ref_biomass = mean_biomass) %>%
+   dplyr :: select(sy, plotID, ref_biomass)
+
+group_means <- group_means %>%
+  dplyr::mutate(block = substr(plotID, 2, 3))  
+ref <- ref %>%
+  dplyr::mutate(block = substr(plotID, 2, 3))
+
+rr_data <- group_means %>%
+  dplyr::left_join(ref, by = "sy", suffix = c("", "_ref")) %>%
+  dplyr::filter(!is.na(ref_biomass), !is.na(mean_biomass)) %>%
+  dplyr::mutate(RR = mean_biomass / ref_biomass) %>%
+  dplyr::select(-plotID_ref, -block_ref) 
+
+rr_data[sapply(rr_data, is.infinite)] <- NA
+rr_data <- na.omit(rr_data)
+
+
+rr_data$RR <- as.numeric(rr_data$RR)
+rr_data <- as.data.frame(rr_data)
+str(rr_data)
+
+rr_data$lnrr <- log(rr_data$RR + 0.000001) 
+```
+
+Making a new dataset with density at harvest and 4 weeks combined 
+
+```{r}
+rr_data <- rr_data %>%
+  dplyr::rename(lnRR_harvest = lnrr)
+
+rr_density <- rr_density %>%
+ dplyr:: rename(lnRR_4WAP = lnRR)
+
+rr_data <- rr_data %>%
+ dplyr:: mutate(across(c(sy, plotID, block), as.character))
+
+rr_density <- rr_density %>%
+  dplyr::mutate(across(c(sy, plotID, block), as.character))
+
+rr_density_mean <- rr_density %>%
+dplyr::  group_by(sy, block, DPP, ccbm_mg) %>%
+dplyr::  summarise(lnRR_4WAP = mean(lnRR_4WAP, na.rm = TRUE), .groups = "drop")
+
+final_data <- rr_data %>%
+  dplyr :: left_join(rr_density_mean, by = c("sy", "block", "DPP", "ccbm_mg"))
+
+final_data$sy <- as.factor(final_data$sy)
+str(final_data)
+```
+
+
+Removing specific outliers
+```{r, warning = FALSE}
+#x11()
+#plot(final_data$DPP, final_data$lnRR_4WAP, pch=19, cex=2, col="goldenrod")
+
+# identify points
+#idx <- identify(final_data$DPP, final_data$lnRR_4WAP, labels = final_data$plotID)
+
+# confirm
+#final_data[idx, c("plotID", "DPP", "lnRR_harvest")]
+
+# remove by row
+
+final_data <- subset(final_data, !(final_data$plotID %in% c("M73MW", "D73LW", "V02LW")))
+
+ggplot(final_data, aes(x = DPP, y = lnRR_4WAP, color = state)) +
+  geom_point(size = 2, alpha = 0.4) +
+  geom_smooth(method = "lm", fullrange = TRUE, size = 1, alpha = 0.2) +
+  theme_light()
+```
+
+```{r}
+final_data$ccbm_sc <- scale(final_data$ccbm_mg)
+final_data$DPP_sc  <- scale(final_data$DPP)
+```
+
+### Model 1 (cover crop biomass ~ days pre planting)
+
+
+```{r}
+mod1 <- lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_data, na.action = na.omit) #slope correlated
+mod1a <- lmer(ccbm_sc ~ DPP_sc + (DPP_sc || sy), data = final_data) # uncorrelated random effects
+anova(mod1a, mod1) # correlated is better!
+summary(mod1)
+Anova(mod1, type = "III", test = "Chisq")
+```
+
+
+```{r   fig.width = 5, fig.height = 5}
+residuals <- resid(mod1)
+hist(residuals, breaks = 20, main = "Histogram of Residuals")
+ggplot(data.frame(eta = predict(mod1, type="link"), pearson = residuals(mod1, type = "pearson")),
+    aes(x = eta,y = pearson)) +
+    geom_point() +
+    theme_bw()
+qqnorm(residuals)
+qqline(residuals, col="red")
+infIndexPlot(mod1, vars = "Cook")
+dotplot(ranef(mod1))
+```
+
+```{r, fig.height = 15, fig.width = 10}
+re <- ranef(mod1)$sy
+re_df <- re %>%
+  tibble::rownames_to_column("sy") %>%
+  rename(rand_intercept = `(Intercept)`)
+fix_int <- fixef(mod1)[1]
+re_df <- re_df %>%
+  mutate(intercept = fix_int + rand_intercept)
+final_data1 <- final_data %>%
+  left_join(re_df, by = "sy")
+final_data1 <- final_data1 %>%
+  mutate(sy = reorder(sy, intercept))
+
+ggplot(final_data1, aes(x = DPP_sc.x, y = ccbm_sc)) +
+  geom_point(size = 2, alpha = 0.2, pch = 16) +
+  geom_smooth(method = "lm", se = TRUE,
+              fullrange = TRUE, 
+              size = 0.75, alpha = 0.5,
+              col = "hotpink") +
+  theme_light() + 
+  theme(axis.title = element_text(size = 14),
+        legend.title = element_text(size = 14), 
+        aspect.ratio = 1.5)+
+  labs(y = "cover crop biomass scaled", x = "days pre planting")+
+  facet_wrap(~sy)
+```
+
+
+
+### Model 2 (lnRR ~ ccbm)
+
+
+```{r}
+
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit) #slope correlated
+
+
+
+
+summary(mod2)
+VarCorr(mod2)
+Anova(mod2, type = "III", test.statistic = "Chisq")
+```
+
+
+```{r}
+
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit) #slope correlated
+mod2a <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_data) # uncorrelated random effects
+anova(mod2a, mod2) # correlated is better!
+
+
+
+summary(mod2)
+VarCorr(mod2)
+Anova(mod2, type = "III", test.statistic = "Chisq")
+```
+
+```{r   fig.width = 5, fig.height = 5}
+residuals <- resid(mod2)
+hist(residuals, breaks = 20, main = "Histogram of Residuals")
+ggplot(data.frame(eta = predict(mod2, type="link"), pearson = residuals(mod2, type = "pearson")),
+    aes(x = eta,y = pearson)) +
+    geom_point() +
+    theme_bw()
+qqnorm(residuals)
+qqline(residuals, col="red")
+infIndexPlot(mod2, vars = "Cook")
+dotplot(ranef(mod2))
+```
+
+```{r, fig.height = 15, fig.width = 10}
+re <- ranef(mod2)$sy
+re_df <- re %>%
+  tibble::rownames_to_column("sy") %>%
+  rename(rand_intercept = `(Intercept)`)
+fix_int <- fixef(mod2)[1]
+re_df <- re_df %>%
+  mutate(intercept = fix_int + rand_intercept)
+final_data1 <- final_data %>%
+  left_join(re_df, by = "sy")
+final_data1 <- final_data1 %>%
+  mutate(sy = reorder(sy, intercept))
+
+ggplot(final_data1, aes(x = ccbm_sc.x, y = lnRR_4WAP)) +
+  geom_point(size = 2, alpha = 0.2, pch = 16) +
+  geom_smooth(method = "lm", se = TRUE,
+              fullrange = TRUE, 
+              size = 0.75, alpha = 0.5,
+              col = "seagreen1") +
+  theme_light() + 
+  theme(axis.title = element_text(size = 14),
+        legend.title = element_text(size = 14), 
+        aspect.ratio = 1.5)+
+  labs(y = "lnRR_4WAP", x = "ccbmscaled")+
+  facet_wrap(~sy)
+```
+
+
+
+### solving for % change in density
+
+First back transforming from the scaled version
+
+
+MAKE A TABLE with this information
+Stick to 14 days pre-plant
+make a few thresholds like 50%, 75%, and 90%
+
+Can we isolate a maximum and minimum based on the site year random effect?
+
+```{r}
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit)
+# coefficients 
+b0 <- fixef(mod2)[1]
+b1 <- fixef(mod2)["ccbm_sc"]
+b2 <- fixef(mod2)["DPP_sc"]
+
+# means and SDs
+mean_ccbm <- mean(final_data$ccbm_mg, na.rm = TRUE) # MUST REMOVE NAs
+sd_ccbm   <- sd(final_data$ccbm_mg, na.rm = TRUE)
+
+mean_dpp <- mean(final_data$DPP, na.rm = TRUE)
+sd_dpp   <- sd(final_data$DPP, na.rm = TRUE)
+
+
+dpp_val <- -14  # termination two weeks before planting 
+
+#scaled to normal
+dpp_sc <- (dpp_val - mean_dpp) / sd_dpp
+
+# target level-- so here it's 90% reduction
+# lnRR = ln (cover crop treatments/ no cover crops)
+target_lnRR <- log(0.20)
+
+biomass_needed <- mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1)
+```
+This is the version from before the scaling 
+I'm checking to see if the number is close
+```{r}
+mod2 <-  lmer(lnRR_4WAP ~ ccbm_mg + DPP  + (ccbm_mg | sy), data = final_data, na.action = na.omit)
+b0 <- fixef(mod2)[1]
+b1 <- fixef(mod2)["ccbm_mg"]
+b2 <- fixef(mod2)["DPP"]
+dpp_val <- -14 # termination right before planting
+target_lnRR <- log(0.1) # 90% decrease in density 
+biomass_needed <- (target_lnRR - b0 - b2 * dpp_val) / b1
+```
+
+It is so close I think we call it the same. This just confirms the back transforming is actually working! 
+
+
+Different termination timings for 90% decline in density (citation--I think liebman)
+
+```{r}
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit)
+b0 <- fixef(mod2)[1]
+b1 <- fixef(mod2)["ccbm_sc"]
+b2 <- fixef(mod2)["DPP_sc"]
+mean_ccbm <- mean(final_data$ccbm_mg, na.rm = TRUE) # MUST REMOVE NAs
+sd_ccbm   <- sd(final_data$ccbm_mg, na.rm = TRUE)
+mean_dpp <- mean(final_data$DPP, na.rm = TRUE)
+sd_dpp   <- sd(final_data$DPP, na.rm = TRUE)
+dpp_sc <- (dpp_val - mean_dpp) / sd_dpp
+target_lnRR <- log(0.10)
+
+dpp_val <- 0 # termination day of
+dpp_sc <- (dpp_val - mean_dpp) / sd_dpp
+biomass_needed <- mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1)
+
+dpp_val <- -14 # termination late
+dpp_sc <- (dpp_val - mean_dpp) / sd_dpp
+biomass_needed <-  mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1)
+
+dpp_val <- -28 # termination mid
+dpp_sc <- (dpp_val - mean_dpp) / sd_dpp
+biomass_needed <-  mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1)
+
+dpp_val <- -42 # termination mid
+dpp_sc <- (dpp_val - mean_dpp) / sd_dpp
+biomass_needed <-  mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1)
+
+dpp_val <- -56 # termination early
+dpp_sc <- (dpp_val - mean_dpp) / sd_dpp
+biomass_needed <-  mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1)
+
+```
+
+Termination the day of planting: To cause a 90% reduction in weed density, you need 4.8Mg per hectare. 
+
+Termination 2 weeks before planting: To cause a 90% reduction in weed density, you need 5.5Mg per hectare. 
+
+Termination 4 weeks before planting: To cause a 90% reduction in weed density, you need 6.3 Mg per hectare. 
+
+Termination 6 weeks before planting: To cause a 90% reduction in weed density, you need 7.0 Mg per hectare. 
+
+Termination 8 weeks before planting: To cause a 90% reduction in weed density, you need 7.8 Mg per hectare. 
+
+Nichols et al (2020) didn't have a specific number in text for a 90% reduction in weed density-- they said that none of their sites could realistically achieve a biomass to cause this reduction. I think our numbers align well with their findings. 
+
+
+Find the max and min and maybe make a figure?? Table I made in word
+
+
+I'm starting over to be not confused 
+```{r}
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit) # the model
+
+# coefficients 
+b0 <- fixef(mod2)[1] #intercept
+b1 <- fixef(mod2)["ccbm_sc"]
+b2 <- fixef(mod2)["DPP_sc"]
+
+# means and SDs
+mean_ccbm <- mean(final_data$ccbm_mg, na.rm = TRUE) # MUST REMOVE NAs
+sd_ccbm   <- sd(final_data$ccbm_mg, na.rm = TRUE)
+
+mean_dpp <- mean(final_data$DPP, na.rm = TRUE)
+sd_dpp   <- sd(final_data$DPP, na.rm = TRUE)
+
+#fix the term timing
+dpp_val <- -14  # termination two weeks before planting 
+
+#scaled to normal
+dpp_sc <- (dpp_val - mean_dpp) / sd_dpp
+
+# target level--  here it's 90% reduction
+# lnRR = ln (cover crop treatments/ no cover crops)
+target_lnRR <- log(0.10)
+
+biomass_needed <- mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1)
+re <- ranef(mod2)$sy #random effect
+
+#slope deviation
+slope_dev <- re$ccbm_sc
+
+min_slope <- min(slope_dev)
+max_slope <- max(slope_dev)
+
+
+#slope adjustments
+b1_min <- b1 + min_slope
+b1_max <- b1 + max_slope
+
+#this is the actual number not the range
+biomass_90_pop <- mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1)
+
+#range
+#max (you put the min in the denom but it's the max I swear)
+biomass_90_max <- mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1_min)
+#min
+biomass_90_min <- mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1_max)
+
+
+
+#repeat above for 75%
+target_lnRR <- log(0.25)
+biomass_needed <- mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1)
+re <- ranef(mod2)$sy
+slope_dev <- re$ccbm_sc
+min_slope <- min(slope_dev)
+max_slope <- max(slope_dev)
+b1_min <- b1 + min_slope
+b1_max <- b1 + max_slope
+biomass_75_pop <- mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1)
+biomass_75_max <- mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1_min)
+biomass_75_min <- mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1_max)
+
+
+
+
+# 50% reduction
+target_lnRR <- log(0.5)
+biomass_needed <- mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1)
+re <- ranef(mod2)$sy
+slope_dev <- re$ccbm_sc
+min_slope <- min(slope_dev)
+max_slope <- max(slope_dev)
+b1_min <- b1 + min_slope
+b1_max <- b1 + max_slope
+biomass_50_pop <- mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1)
+biomass_50_max <- mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1_min)
+biomass_50_min <- mean_ccbm + 
+  sd_ccbm * ((target_lnRR - b0 - b2 * dpp_sc) / b1_max)
+```
+
+
+
+Holding at 2 Mg/ha 
+model would predict x reduction in weed density at 4 wap
+
+Inspection of population-level fixed effect estimates (ß0, ß1) from candidate models and back-transformed predictions of weed suppression levels demonstrate how the model fitting procedure can influence management inferences. At a 2 Mg ha-1 of CCSR biomass, simple linear regression (M1) would predict a XX% reduction in weed density at 4 WAP, whereas a random intercept (M2) and random intercept and slope (M3) model would predict a XX% and XX% reduction in weed density. 
+
+```{r}
+final_data$ccbm_sc <- as.numeric(scale(final_data$ccbm_mg))
+final_data$DPP_sc  <- as.numeric(scale(final_data$DPP))
+mod <- lm(lnRR_4WAP ~ ccbm_sc , data= final_data, na.action = na.omit)
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc  + (ccbm_sc | sy), data = final_data, na.action = na.omit) #slope correlated
+mod2a <- lmer(lnRR_4WAP ~ ccbm_sc  + (ccbm_sc || sy), data = final_data) # uncorrelated random effects
+
+
+
+#first make 2Mg in the scaled scale
+ccbm_mean <- mean(final_data$ccbm_mg, na.rm = TRUE)
+ccbm_sd   <- sd(final_data$ccbm_mg, na.rm = TRUE)
+ccbm_sc_2mg <- (2 - ccbm_mean) / ccbm_sd #finding 2 but scaled
+
+#need to pick a reasonable termination time
+DPP_mean <- mean(final_data$DPP, na.rm = TRUE)
+DPP_sd   <- sd(final_data$DPP, na.rm = TRUE)
+
+DPP_sc_14 <- (-14 - DPP_mean) / DPP_sd #two weeks
+
+newdat <- data.frame(
+  ccbm_sc = ccbm_sc_2mg,
+  DPP_sc = DPP_sc_14
+)
+
+pred_lnRR <- predict(mod, newdata = newdat) #predict
+RR <- exp(pred_lnRR) #back transform the lnrr 
+percent_reduction <- (1 - RR) * 100 #percent reduction
+
+# mixed model just intercept
+
+mod2c <- lmer(lnRR_4WAP ~ ccbm_sc  + ( 1 | sy), data = final_data) # uncorrelated random effects
+
+pred_lnRR_int <- predict(mod2c, newdata = newdat, re.form = NA)
+RR_int <- exp(pred_lnRR_int) #back transform the lnrr 
+percent_reduction_int <- (1 - RR_int) * 100 #percent reduction
+
+
+
+#correlated mixed model
+final_data$ccbm_sc <- as.numeric(scale(final_data$ccbm_mg))
+final_data$DPP_sc  <- as.numeric(scale(final_data$DPP))
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc +  (ccbm_sc | sy), data = final_data, na.action = na.omit) #slope correlated
+
+
+pred_lnRR_corr <- predict(mod2, newdata = newdat, re.form = NA)
+RR_corr <- exp(pred_lnRR_corr) #back transform the lnrr 
+percent_reduction_corr <- (1 - RR_corr) * 100 #percent reduction
+
+
+
+```
+
+
+
+1Mg
+
+```{r}
+final_data$ccbm_sc <- as.numeric(scale(final_data$ccbm_mg))
+final_data$DPP_sc  <- as.numeric(scale(final_data$DPP))
+mod <- lm(lnRR_4WAP ~ ccbm_sc , data= final_data, na.action = na.omit)
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc  + (ccbm_sc | sy), data = final_data, na.action = na.omit) #slope correlated
+mod2a <- lmer(lnRR_4WAP ~ ccbm_sc  + (ccbm_sc || sy), data = final_data) # uncorrelated random effects
+
+
+
+#first make 1Mg in the scaled scale
+ccbm_mean <- mean(final_data$ccbm_mg, na.rm = TRUE)
+ccbm_sd   <- sd(final_data$ccbm_mg, na.rm = TRUE)
+ccbm_sc_1mg <- (1 - ccbm_mean) / ccbm_sd #finding 2 but scaled
+
+newdat <- data.frame(
+  ccbm_sc = ccbm_sc_1mg
+ 
+)
+
+pred_lnRR <- predict(mod, newdata = newdat) #predict
+RR <- exp(pred_lnRR) #back transform the lnrr 
+percent_reduction <- (1 - RR) * 100 #percent reduction
+
+# mixed model just intercept
+
+mod2c <- lmer(lnRR_4WAP ~ ccbm_sc  + ( 1 | sy), data = final_data) # uncorrelated random effects
+
+pred_lnRR_int <- predict(mod2c, newdata = newdat, re.form = NA)
+RR_int <- exp(pred_lnRR_int) #back transform the lnrr 
+percent_reduction_int <- (1 - RR_int) * 100 #percent reduction
+
+
+
+#correlated mixed model
+final_data$ccbm_sc <- as.numeric(scale(final_data$ccbm_mg))
+final_data$DPP_sc  <- as.numeric(scale(final_data$DPP))
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc +  (ccbm_sc | sy), data = final_data, na.action = na.omit) #slope correlated
+
+
+pred_lnRR_corr <- predict(mod2, newdata = newdat, re.form = NA)
+RR_corr <- exp(pred_lnRR_corr) #back transform the lnrr 
+percent_reduction_corr <- (1 - RR_corr) * 100 #percent reduction
+
+
+
+```
+
+
+
+4Mg
+
+```{r}
+final_data$ccbm_sc <- as.numeric(scale(final_data$ccbm_mg))
+final_data$DPP_sc  <- as.numeric(scale(final_data$DPP))
+mod <- lm(lnRR_4WAP ~ ccbm_sc , data= final_data, na.action = na.omit)
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc  + (ccbm_sc | sy), data = final_data, na.action = na.omit) #slope correlated
+mod2a <- lmer(lnRR_4WAP ~ ccbm_sc  + (ccbm_sc || sy), data = final_data) # uncorrelated random effects
+
+
+
+#first make 4Mg in the scaled scale
+ccbm_mean <- mean(final_data$ccbm_mg, na.rm = TRUE)
+ccbm_sd   <- sd(final_data$ccbm_mg, na.rm = TRUE)
+ccbm_sc_4mg <- (4 - ccbm_mean) / ccbm_sd #finding 2 but scaled
+
+
+newdat <- data.frame(
+  ccbm_sc = ccbm_sc_4mg
+)
+
+pred_lnRR <- predict(mod, newdata = newdat) #predict
+RR <- exp(pred_lnRR) #back transform the lnrr 
+percent_reduction <- (1 - RR) * 100 #percent reduction
+
+# mixed model just intercept
+
+mod2c <- lmer(lnRR_4WAP ~ ccbm_sc  + ( 1 | sy), data = final_data) # uncorrelated random effects
+
+pred_lnRR_int <- predict(mod2c, newdata = newdat, re.form = NA)
+RR_int <- exp(pred_lnRR_int) #back transform the lnrr 
+percent_reduction_int <- (1 - RR_int) * 100 #percent reduction
+
+
+
+#correlated mixed model
+final_data$ccbm_sc <- as.numeric(scale(final_data$ccbm_mg))
+final_data$DPP_sc  <- as.numeric(scale(final_data$DPP))
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc +  (ccbm_sc | sy), data = final_data, na.action = na.omit) #slope correlated
+
+
+pred_lnRR_corr <- predict(mod2, newdata = newdat, re.form = NA)
+RR_corr <- exp(pred_lnRR_corr) #back transform the lnrr 
+percent_reduction_corr <- (1 - RR_corr) * 100 #percent reduction
+
+
+
+```
+
+
+
+### PSEM
+
+Starting-- most basic, no end-season density
+
+DPP -> ccbm 
+ccbm -> lnrr_mid
+```{r}
+psemDensity <- psem(
+  lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_data, na.action = na.omit)
+)
+
+dSep(psemDensity, .progressBar = FALSE)
+# p = 0.059
+fisherC(psemDensity)
+#Fisher's: 5.643 on 2 df, p = 0.06	
+summary(psemDensity)
+```
+
+The p = 0.059 is stressing me out because it is so borderline
+
+DPP -> ccbm 
+ccbm -> lnrr_mid
+```{r}
+psemDensity1 <- psem(
+  lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_data, na.action = na.omit)
+)
+
+dSep(psemDensity1, .progressBar = FALSE)
+# saturated
+fisherC(psemDensity1)
+#Fisher's: 5.643 on 2 df, p = 0.06	
+summary(psemDensity1)
+```
+
+
+Confirmed-- we are keeping this as the final model
+
+
+## Figure 2 ig
+
+```{r}
+mod2b <- lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc | sy), data = final_data) # remove dpp
+summary(mod2b)
+r2(mod2b)
+AIC(mod2b)
+```
+
+
+```{r}
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc | sy), data = final_data) # remove dpp
+rd2 <- broom.mixed::tidy(mod2, effects = "ran_vals", conf.int = TRUE, response = TRUE)
+rd2 <- as.data.frame(rd2) 
+interceptd2 <- subset(rd2, term == "(Intercept)")
+sloped2 <- subset(rd2, term == "ccbm_sc")
+sloped2$slope <- sloped2$estimate
+sloped2$slope.low <- sloped2$conf.low
+sloped2$slope.high <- sloped2$conf.high
+df.biplotd2 <- cbind(interceptd2, sloped2$slope, sloped2$slope.low, sloped2$slope.high)
+df.biplotd2 <- as.data.frame(df.biplotd2)
+
+figure1d <-
+  ggplot(df.biplotd2, 
+         aes (x = estimate, 
+              y = sloped2$slope, xmin = conf.low, 
+              xmax = conf.high,  
+              ymin = sloped2$slope.low, 
+              ymax = sloped2$slope.high, 
+              fill = level, color = level)) + 
+  geom_hline(yintercept = 0, color = "gray85", size=0.75) +
+  geom_vline(xintercept = 0, color = "gray85", size=0.75) +
+  geom_errorbar(size=0.5, alpha = 0.3) + 
+  geom_errorbarh(size=0.5, alpha = 0.3) + 
+  geom_point(size = 1.5, shape = 21, alpha = 1.0, stroke = 0.8) +
+  labs(x = "Conditional mode (random intercept)",
+       y = "Conditional mode (random slope)", 
+       color = "Site-year", fill = "Site-year") + 
+  theme_light () + 
+  scale_color_manual(values = c("#266B7E", "#266B7E",  
+                                "#A18902", "#A18902", 
+                                "#68180D", "#68180D", 
+                                "#023146", 
+                                "#AE8224",
+                                "#AE8224", "#AE8224",
+                                "#9D8206", "#9D8206","#9D8206",  
+                                "#266B7E", "#266B7E", "#266B7E", "#266B7E"))+
+
+   scale_fill_manual(values = c("#7294D4", "#7294D4",  #delaware
+                                "#FAD510", "#FAD510", #illinois
+                                "#C52E19", "#C52E19", #louisiana
+                                "#046C9A", #maryland
+                                "#F3DF6C", #minnesota
+                                "#FBA72A", "#FBA72A",#missouri
+                                "#CEAB07", "#CEAB07", "#CEAB07", #nebraska
+                                "#85D4E3", "#85D4E3", "#85D4E3", "#85D4E3")) +
+  theme(
+       axis.text.x = element_text(size=10), 
+        axis.text.y = element_text(size=10),
+        axis.title.y = element_text(size=10), 
+        axis.title.x = element_text(size=10),
+       legend.position = "none",
+       legend.spacing.x = unit(10, "pt"),
+       legend.text = element_text(size = 8),
+       legend.title = element_text(size = 9),
+       legend.key.size = unit(0.5, "cm"),
+       legend.key.spacing.y = unit(0, "pt"),
+       legend.box.margin = margin(-5, -5, -5, -5))+
+  guides(col = guide_legend(nrow = 3, byrow = TRUE))
+
+
+
+
+figure1d
+#ggsave("figure1d.png", width = 7, height = 2.5, units = "in", dpi = 300)
+```
+
+
+
+```{r}
+
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc | sy), data = final_data) # remove dpp
+
+# am having issues with dropped site years sneaking back into df
+# in the dataframe we have lots of site years but in mod2 only 17 have enough observations
+
+valid_sy <- unique(mod2@frame$sy) #just site years in mod2
+
+newdat <- expand.grid(
+  ccbm_sc = seq(min(final_data$ccbm_sc, na.rm = TRUE),
+                max(final_data$ccbm_sc, na.rm = TRUE),
+                length.out = 100),
+  DPP_sc = mean(final_data$DPP_sc, na.rm = TRUE),
+  sy = valid_sy
+)
+newdat$pred_sy <- predict(mod2, newdata = newdat, re.form = NULL)
+
+newdat$pred_pop <- predict(mod2, newdata = newdat, re.form = NA)
+```
+
+
+Confidence interval
+
+```{r}
+pred_int1 <- predictInterval(
+  mod2,
+  newdata = newdat,
+  level = 0.95, #seems fine
+  n.sims = 1000, #runs fast?? good enough
+  stat = "mean",
+  include.resid.var = FALSE,
+  which = "fixed"  # we only want the confidence interval for the population line not the site year lines
+)
+
+newdat$fit   <- pred_int1$fit
+newdat$lwr   <- pred_int1$lwr
+newdat$upr   <- pred_int1$upr
+```
+
+
+```{r}
+figure1c <- ggplot() +
+  # Site-year lines (colored)
+  geom_line(data = newdat,
+            aes(x = ccbm_sc, y = pred_sy, color = sy),
+            size = 0.75, alpha = 0.4) +
+  geom_line(data = newdat,
+            aes(x = ccbm_sc, y = pred_pop),
+            color = "black", size = 1.5) +
+  geom_ribbon(data = newdat,
+            aes(x = ccbm_sc, ymin = lwr, ymax = upr),
+            fill = "gray30", alpha = 0.4) +
+  labs(x = "CCSR biomass",
+       y = "Weed density (LRR; 4 WAP)", 
+       color = "Site-year") + 
+  theme_light () + 
+  scale_color_manual(values = c("#7294D4", "#7294D4", #delaware
+                                "#FAD510", "#FAD510", #illinois
+                                "#C52E19", "#C52E19", #louisiana
+                                "#046C9A", #maryland
+                                "#F3DF6C", #minnesota
+                                "#FBA72A", "#FBA72A",#missouri
+                                "#CEAB07", "#CEAB07", "#CEAB07", #nebraska
+                                "#85D4E3", "#85D4E3", "#85D4E3", "#85D4E3")) + #virginia
+ 
+   
+  theme(
+       axis.text.x = element_text(size=10), 
+        axis.text.y = element_text(size=10),
+        axis.title.y = element_text(size=10), 
+        axis.title.x = element_text(size=10),
+        legend.position = "none")
+
+
+
+
+
+figure1bottom <- ggarrange(figure1c, figure1d)
+figure1bottom
+
+#work out some save details 
+ggsave("figure1bottom.png", width = 6, height = 2.5, units = "in", dpi = 300)
+```
+
+
+
+
+### Figures
+
+```{r}
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit)
+rd2 <- broom.mixed::tidy(mod2, effects = "ran_vals", conf.int = TRUE, response = TRUE)
+rd2 <- as.data.frame(rd2) 
+interceptd2 <- subset(rd2, term == "(Intercept)")
+sloped2 <- subset(rd2, term == "ccbm_sc")
+sloped2$slope <- sloped2$estimate
+sloped2$slope.low <- sloped2$conf.low
+sloped2$slope.high <- sloped2$conf.high
+df.biplotd2 <- cbind(interceptd2, sloped2$slope, sloped2$slope.low, sloped2$slope.high)
+df.biplotd2 <- as.data.frame(df.biplotd2)
+
+figure1d <-
+  ggplot(df.biplotd2, 
+         aes (x = estimate, 
+              y = sloped2$slope, xmin = conf.low, 
+              xmax = conf.high,  
+              ymin = sloped2$slope.low, 
+              ymax = sloped2$slope.high, 
+              fill = level, color = level)) + 
+  geom_hline(yintercept = 0, color = "gray85", size=0.75) +
+  geom_vline(xintercept = 0, color = "gray85", size=0.75) +
+  geom_errorbar(size=0.5, alpha = 0.3) + 
+  geom_errorbarh(size=0.5, alpha = 0.3) + 
+  geom_point(size = 1.5, shape = 21, alpha = 1.0, stroke = 0.8) +
+  labs(x = "Conditional mode (random intercept)",
+       y = "Conditional mode (random slope)", 
+       color = "Site-year", fill = "Site-year") + 
+  theme_light () + 
+  scale_color_manual(values = c("#266B7E", "#266B7E",  
+                                "#A18902", "#A18902", 
+                                "#68180D", "#68180D", 
+                                "#023146", 
+                                "#AE8224",
+                                "#AE8224", "#AE8224",
+                                "#9D8206", "#9D8206","#9D8206",  
+                                "#266B7E", "#266B7E", "#266B7E", "#266B7E"))+
+
+   scale_fill_manual(values = c("#7294D4", "#7294D4",  #delaware
+                                "#FAD510", "#FAD510", #illinois
+                                "#C52E19", "#C52E19", #louisiana
+                                "#046C9A", #maryland
+                                "#F3DF6C", #minnesota
+                                "#FBA72A", "#FBA72A",#missouri
+                                "#CEAB07", "#CEAB07", "#CEAB07", #nebraska
+                                "#85D4E3", "#85D4E3", "#85D4E3", "#85D4E3")) +
+  theme(
+       axis.text.x = element_text(size=10), 
+        axis.text.y = element_text(size=10),
+        axis.title.y = element_text(size=10), 
+        axis.title.x = element_text(size=10),
+       legend.position = "none",
+       legend.spacing.x = unit(10, "pt"),
+       legend.text = element_text(size = 8),
+       legend.title = element_text(size = 9),
+       legend.key.size = unit(0.5, "cm"),
+       legend.key.spacing.y = unit(0, "pt"),
+       legend.box.margin = margin(-5, -5, -5, -5))+
+  guides(col = guide_legend(nrow = 3, byrow = TRUE))
+
+
+
+
+figure1d
+#ggsave("figure1d.png", width = 7, height = 2.5, units = "in", dpi = 300)
+```
+
+
+
+
+```{r}
+
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit)
+
+# am having issues with dropped site years sneaking back into df
+# in the dataframe we have lots of site years but in mod2 only 17 have enough observations
+
+valid_sy <- unique(mod2@frame$sy) #just site years in mod2
+
+newdat <- expand.grid(
+  ccbm_sc = seq(min(final_data$ccbm_sc, na.rm = TRUE),
+                max(final_data$ccbm_sc, na.rm = TRUE),
+                length.out = 100),
+  DPP_sc = mean(final_data$DPP_sc, na.rm = TRUE),
+  sy = valid_sy
+)
+newdat$pred_sy <- predict(mod2, newdata = newdat, re.form = NULL)
+
+newdat$pred_pop <- predict(mod2, newdata = newdat, re.form = NA)
+```
+
+
+Confidence interval
+
+```{r}
+pred_int1 <- predictInterval(
+  mod2,
+  newdata = newdat,
+  level = 0.95, #seems fine
+  n.sims = 1000, #runs fast?? good enough
+  stat = "mean",
+  include.resid.var = FALSE,
+  which = "fixed"  # we only want the confidence interval for the population line not the site year lines
+)
+
+newdat$fit   <- pred_int1$fit
+newdat$lwr   <- pred_int1$lwr
+newdat$upr   <- pred_int1$upr
+```
+
+
+```{r}
+figure1c <- ggplot() +
+  # Site-year lines (colored)
+  geom_line(data = newdat,
+            aes(x = ccbm_sc, y = pred_sy, color = sy),
+            size = 0.75, alpha = 0.4) +
+  geom_line(data = newdat,
+            aes(x = ccbm_sc, y = pred_pop),
+            color = "black", size = 1.5) +
+  geom_ribbon(data = newdat,
+            aes(x = ccbm_sc, ymin = lwr, ymax = upr),
+            fill = "gray30", alpha = 0.4) +
+  labs(x = "CCSR biomass",
+       y = "Weed density (LRR; 4 WAP)", 
+       color = "Site-year") + 
+  theme_light () + 
+  scale_color_manual(values = c("#7294D4", "#7294D4", #delaware
+                                "#FAD510", "#FAD510", #illinois
+                                "#C52E19", "#C52E19", #louisiana
+                                "#046C9A", #maryland
+                                "#F3DF6C", #minnesota
+                                "#FBA72A", "#FBA72A",#missouri
+                                "#CEAB07", "#CEAB07", "#CEAB07", #nebraska
+                                "#85D4E3", "#85D4E3", "#85D4E3", "#85D4E3")) + #virginia
+ 
+   
+  theme(
+       axis.text.x = element_text(size=10), 
+        axis.text.y = element_text(size=10),
+        axis.title.y = element_text(size=10), 
+        axis.title.x = element_text(size=10),
+        legend.position = "none")
+
+
+
+
+
+figure1bottom <- ggarrange(figure1c, figure1d)
+figure1bottom
+
+#work out some save details 
+ggsave("figure1bottom.png", width = 6, height = 2.5, units = "in", dpi = 300)
+```
+
+
+```{r}
+state_max <- final_data1 %>%
+  group_by(sy) %>%
+  summarise(max_ccbm = max(ccbm_mg, na.rm = TRUE))
+
+highest_common <- min(state_max$max_ccbm)
+
+#use this for the figure I think??
+state_year_summary <- final_data1 %>%
+  group_by(state, year) %>%
+  summarise(
+    mean_ccbm = mean(ccbm_mg, na.rm = TRUE),
+    median_ccbm = median(ccbm_mg, na.rm = TRUE),
+    max_ccbm = max(ccbm_mg, na.rm = TRUE),
+    sd_ccbm = sd(ccbm_mg, na.rm = TRUE),
+    n = sum(!is.na(ccbm_mg)),
+    se_ccbm = sd_ccbm / sqrt(n),
+    .groups = "drop"
+  )
+
+#order from low to high by state
+state_order <- state_year_summary %>%
+  group_by(state) %>%
+  summarise(state_mean = mean(mean_ccbm)) %>%
+  arrange(state_mean) %>%
+  pull(state)
+
+state_year_summary$state <- factor(state_year_summary$state,
+                                   levels = state_order)
+
+#removing sy that are not in the model
+state_year_summary$sy <- interaction(state_year_summary$state, state_year_summary$year)
+#state_year_summary <- subset(state_year_summary, !state_year_summary$state == "TX")
+#state_year_summary <- subset(state_year_summary, !(state_year_summary$sy %in% c("DE.2019", "DE.2020", "IL.2017", "MD.2018", "MD.2019", "MD.2020", "MN.2017", "MN.2018", "MN.2020","MO.2018", "NE.2017")))
+```
+
+
+
+```{r}
+#how to make jitter same for the points AND error bars
+
+jit <- position_jitter(width = 0, height = 0.2, seed = 13)
+
+
+yearmax <- ggplot(state_year_summary,
+       aes(x = mean_ccbm, y = state, fill = state, shape = year)) +
+  
+  scale_shape_manual("Year", values = c(21, 22, 23, 24)) +
+#  scale_fill_manual("Year", values = c( "#972D15", "#C52E19", "#F3DF6C", "#CEAB07", "#FAD510","#7294D4", "#FBA72A",  "#85D4E3", "#046C9A")) + 
+  
+  geom_errorbar(aes(xmin = mean_ccbm - se_ccbm,
+                  xmax = mean_ccbm + se_ccbm),
+              width = 0.3,
+              position = jit) +
+  geom_point(size = 1.7, position = jit) +
+  labs(x = expression(Cover~crop~biomass~(Mg~ha^-1)),
+       y = "State",
+       fill = "state") +
+  scale_x_continuous(limits = c(0, 8))+
+  
+  theme_light() +
+  coord_fixed(ratio = 0.75) +
+  theme(
+       axis.text.x = element_text(size=10), 
+        axis.text.y = element_text(size=10),
+        axis.title.y = element_text(size=10), 
+        axis.title.x = element_text(size=10),
+       legend.position = "none",
+       legend.spacing.x = unit(10, "pt"),
+       legend.text = element_text(size = 8),
+       legend.title = element_text(size = 9),
+       legend.key.size = unit(0.5, "cm"),
+       legend.key.spacing.y = unit(0, "pt"),
+       legend.box.margin = margin(-5, -5, -5, -5))+
+  guides(col = guide_legend(nrow = 3, byrow = TRUE))
+
+#ggsave("yearaverages.png", width = 3.5, height = 3.5, units = "in", dpi = 300)
+```
+
+
+
+
+### Difference figure 2 Mg
+```{r}
+#the scaling
+#final_data$ccbm_sc <- scale(final_data$ccbm_mg)
+#final_data$DPP_sc  <- scale(final_data$DPP)
+#the model
+#mod2 <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit)
+
+ccbm_mean <- mean(final_data$ccbm_mg, na.rm = TRUE)
+ccbm_sd   <- sd(final_data$ccbm_mg, na.rm = TRUE)
+
+DPP_mean <- mean(final_data$DPP, na.rm = TRUE)
+DPP_sd   <- sd(final_data$DPP, na.rm = TRUE)
+
+ccbm_vals <- c(2) #common highest mean among sites yikes
+ccbm_sc_vals <- (ccbm_vals - ccbm_mean) / ccbm_sd #un-scale 
+
+DPP_val <- -14 #focus on 2 weeks pre planting
+DPP_sc_val <- (DPP_val - DPP_mean) / DPP_sd #un-scale
+
+model_sy <- unique(mod2@frame$sy) #site year
+
+newdata <- expand.grid(
+  sy = model_sy,
+  ccbm_sc = ccbm_sc_vals,
+  DPP_sc = DPP_sc_val
+)
+
+newdata$biomass <- rep(c("2 Mg/ha"), #yikes
+                       each = length(model_sy))
+
+#check we didn't remove anything by accident
+#length(unique(mod2@frame$sy)) #17 sy
+#length(unique(newdata$sy))# 17 sy
+
+
+```
+
+
+
+```{r}
+newdata$fit_sy <- predict(mod2, newdata = newdata, re.form = NULL)
+newdata$fit_pop <- predict(mod2, newdata = newdata, re.form = NA)
+pred_pop <- predictInterval(
+  mod2,
+  newdata = newdata,
+  level = 0.95,
+  n.sims = 2000,
+  stat = "mean",
+  include.resid.var = FALSE,
+  which = "fixed"
+)
+# convert to %
+newdata$percent_sy  <- (1 - exp(newdata$fit_sy)) * 100
+newdata$percent_pop <- (1 - exp(newdata$fit_pop)) * 100
+
+newdata$pop_lwr <- (1 - exp(pred_pop$upr)) * 100
+newdata$pop_upr <- (1 - exp(pred_pop$lwr)) * 100
+
+pop_data <- data.frame(
+  sy = "Population",
+  percent_pop = unique(newdata$percent_pop)[1],
+  pop_lwr = unique(newdata$pop_lwr)[1],
+  pop_upr = unique(newdata$pop_upr)[1]
+)
+
+pop_mean <- unique(newdata$percent_pop)[1]
+
+plot_data <- newdata %>%
+  mutate(
+    deviation = percent_sy - pop_mean
+  )
+
+plot_data <- plot_data %>%
+  arrange(percent_sy)
+
+plot_data$sy <- factor(plot_data$sy, levels = plot_data$sy)
+```
+
+
+```{r}
+figure2b1 <- ggplot(plot_data, aes(y = sy, fill = sy, color = sy)) +
+ geom_vline(xintercept = 0,
+             linetype = "dashed",
+             color = "gray50",
+             size = 0.25) + 
+  # segment from population mean to site-year
+  geom_segment(aes(x = pop_mean, xend = percent_sy,
+                   yend = sy),
+               color = "gray20", size = 0.5) +
+  
+  
+  # population reference line
+  geom_vline(xintercept = pop_mean,
+             linetype = "longdash",
+             color = "black", 
+             size = 0.5) +
+  # population reference point
+ geom_point(data = pop_data,
+           aes(x = percent_pop, y = sy),
+           shape = 21,
+           size = 3,
+           fill = "black",
+           color = "black") + 
+  # population reference point error bar
+geom_errorbarh(data = pop_data,
+               aes(xmin = pop_lwr,
+                   xmax = pop_upr,
+                   y = sy),
+               height = 0.5,
+               color = "black",
+               size = 0.5) +
+
+    # site-year points
+  geom_point(aes(x = percent_sy),
+             shape = 21, size = 1.25, stroke = 0.7) +
+  
+    
+  scale_color_manual(values = c("#9D8206", #NE
+                                "#AE8224",#MN
+                                "#AE8224",#MO
+                                "#A18902",#IL
+                                "#266B7E",#VA
+                                "#023146", #DE
+                                "#A18902", #IL
+                                "#266B7E", #VA
+                                "#266B7E",#VA
+                                "#023146",#MD
+                                "#9D8206",#NE
+                                "#9D8206",#NE
+                                "#AE8224",#MO
+                                "#266B7E",#VA
+                                "#68180D", #LA
+                                "#023146",#DE
+                                "#68180D", #LA
+                                "black"))+
+  scale_fill_manual(values = c( "#CEAB07", #NE
+                               "#F3DF6C", #MN
+                               "#FBA72A", #MO
+                               "#FAD510", #IL
+                               "#85D4E3",  #VA
+                               "#7294D4", #DE
+                               "#FAD510", #IL
+                               "#85D4E3", #VA
+                               "#85D4E3", #VA
+                               "#046C9A", #MD
+                               "#CEAB07", 
+                               "#CEAB07", #NE
+                               "#FBA72A", #MO
+                               "#85D4E3", #VA
+                               "#C52E19", #LA
+                               "#7294D4",#DE
+                               "#C52E19", #LA
+                               "black" #population
+                               ))+
+  
+  labs(x = "% reduction in weed density",
+       y = "Site-Year") +
+  
+  theme_light() +
+  theme(
+       axis.text.x = element_text(size=8), 
+        axis.text.y = element_text(size=7.5, margin = margin(r = -0.5)),
+        axis.title.y = element_text(size=10, margin = margin(r = -0.5)), 
+        axis.title.x = element_text(size=10),
+       legend.position = "none",
+       legend.spacing.x = unit(10, "pt"),
+       legend.text = element_text(size = 8),
+       legend.title = element_text(size = 9),
+       legend.key.size = unit(0.5, "cm"),
+       legend.key.spacing.y = unit(0, "pt"),
+       legend.box.margin = margin(-5, -5, -5, -5))+
+  guides(col = guide_legend(nrow = 3, byrow = TRUE))
+figure2b1
+ggsave("percentdiff2mgall.png", width = 2.5, height = 2.5, units = "in", dpi = 300)
+```
+
+
+```{r}
+
+#final_data$ccbm_sc <- scale(final_data$ccbm_mg)
+#final_data$DPP_sc  <- scale(final_data$DPP)
+#the model
+#mod2 <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit)
+
+ccbm_mean <- mean(final_data$ccbm_mg, na.rm = TRUE)
+ccbm_sd   <- sd(final_data$ccbm_mg, na.rm = TRUE)
+
+DPP_mean <- mean(final_data$DPP, na.rm = TRUE)
+DPP_sd   <- sd(final_data$DPP, na.rm = TRUE)
+
+ccbm_vals <- c(2) #common highest mean among sites yikes
+ccbm_sc_vals <- (ccbm_vals - ccbm_mean) / ccbm_sd #un-scale 
+
+DPP_val <- -14 #focus on 2 weeks pre planting
+DPP_sc_val <- (DPP_val - DPP_mean) / DPP_sd #un-scale
+
+model_sy <- unique(mod2@frame$sy) #site year
+
+newdata <- expand.grid(
+  sy = model_sy,
+  ccbm_sc = ccbm_sc_vals,
+  DPP_sc = DPP_sc_val
+)
+
+newdata$biomass <- rep(c("2 Mg/ha"), #yikes
+                       each = length(model_sy))
+
+#check we didn't remove anything by accident
+#length(unique(mod2@frame$sy)) #17 sy
+#length(unique(newdata$sy))# 17 sy
+
+newdata <- subset(newdata, !(newdata$sy %in% c("LA.2020", "LA.2019", "MN.2019", "NE.2020", "NE.2019","IL.2019", "DE.2018","MO.2020", "MO.2019", "VA.2019")))
+
+newdata$fit_sy <- predict(mod2, newdata = newdata, re.form = NULL)
+newdata$fit_pop <- predict(mod2, newdata = newdata, re.form = NA)
+pred_pop <- predictInterval(
+  mod2,
+  newdata = newdata,
+  level = 0.95,
+  n.sims = 2000,
+  stat = "mean",
+  include.resid.var = FALSE,
+  which = "fixed"
+)
+# convert to %
+newdata$percent_sy  <- (1 - exp(newdata$fit_sy)) * 100
+newdata$percent_pop <- (1 - exp(newdata$fit_pop)) * 100
+
+newdata$pop_lwr <- (1 - exp(pred_pop$upr)) * 100
+newdata$pop_upr <- (1 - exp(pred_pop$lwr)) * 100
+
+pop_data <- data.frame(
+  sy = "Population",
+  percent_pop = unique(newdata$percent_pop)[1],
+  pop_lwr = unique(newdata$pop_lwr)[1],
+  pop_upr = unique(newdata$pop_upr)[1]
+)
+
+pop_mean <- unique(newdata$percent_pop)[1]
+
+plot_data <- newdata %>%
+  mutate(
+    deviation = percent_sy - pop_mean
+  )
+
+plot_data <- plot_data %>%
+  arrange(percent_sy)
+
+plot_data$sy <- factor(plot_data$sy, levels = plot_data$sy)
+```
+
+
+```{r}
+
+
+figure2b1A <- ggplot(plot_data, aes(y = sy, fill = sy, color = sy)) +
+  
+  # segment from population mean to site-year
+  geom_segment(aes(x = pop_mean, xend = percent_sy,
+                   yend = sy),
+               color = "gray20", size = 0.5) +
+  
+  # site-year points
+  geom_point(aes(x = percent_sy),
+             shape = 21, size = 1.75, stroke = 0.8) +
+  
+  # population reference line
+  geom_vline(xintercept = pop_mean,
+             linetype = "longdash",
+             color = "black", 
+             size = 0.6) +
+  # population reference point
+ geom_point(data = pop_data,
+           aes(x = percent_pop, y = sy),
+           shape = 21,
+           size = 3,
+           fill = "black",
+           color = "black") + 
+  # population reference point error bar
+geom_errorbarh(data = pop_data,
+               aes(xmin = pop_lwr,
+                   xmax = pop_upr,
+                   y = sy),
+               height = 0.5,
+               color = "black",
+               size = 0.5) +
+  geom_vline(xintercept = 0,
+             linetype = "dashed",
+             color = "black",
+             size = 0.25) +
+    
+  scale_color_manual(values = c(
+                                "#A18902", #IL
+                                "#266B7E", #VA
+                                "#266B7E",#VA
+                                "#023146",#MD
+                                "#9D8206",#NE
+                                "#266B7E",#VA
+                                "#023146",#DE
+                                
+                                "black"))+
+  scale_fill_manual(values = c( 
+                               "#FAD510", #IL
+                               "#85D4E3", #VA
+                               "#85D4E3", #VA
+                               "#046C9A", #MD
+                               "#CEAB07", #NE
+                               "#85D4E3", #VA
+                               "#7294D4",#DE
+                              
+                               "black" #population
+                               ))+
+  
+  labs(x = "% reduction in weed density",
+       y = "Site-Year") +
+  
+  theme_light() +
+  theme(
+       axis.text.x = element_text(size=8), 
+        axis.text.y = element_text(size=7.5, margin = margin(r = -0.5)),
+        axis.title.y = element_text(size=10, margin = margin(r = -0.5)), 
+        axis.title.x = element_text(size=10),
+       legend.position = "none",
+       legend.spacing.x = unit(10, "pt"),
+       legend.text = element_text(size = 8),
+       legend.title = element_text(size = 9),
+       legend.key.size = unit(0.5, "cm"),
+       legend.key.spacing.y = unit(0, "pt"),
+       legend.box.margin = margin(-5, -5, -5, -5))+
+  guides(col = guide_legend(nrow = 3, byrow = TRUE))
+figure2b1A
+ggsave("percentdiff2mgsubset.png", width = 5, height = 2.5, units = "in", dpi = 300)
+```
+
+
+
+
+```{r}
+
+## model
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit)
+
+
+##what I had
+eff1 <- effect("DPP_sc", mod2, partial.residuals = T)
+closest <- function(x, x0) apply(outer(x, x0, FUN = function(x, x0) abs(x - x0)), 1, which.min)
+x.fit <- unlist(eff1$x.all)
+trans <- I
+
+x <- data.frame(lower = eff1$lower, upper = eff1$upper, fit = eff1$fit, DPP_sc = eff1$x$DPP_sc)
+xy <- data.frame(x = x.fit, y = x$fit[closest(trans(x.fit), x$DPP_sc)] + eff1$residuals)
+
+
+lnrr_dpp_sc_effects <- ggplot(x, aes(x = DPP_sc, y = fit)) +
+  geom_point(data = xy, aes(x = x, y = y),
+            shape = 16, col = "gray", size = 2, alpha = 0.25)+
+
+ geom_line(data = x, aes(x = DPP_sc, y = fit),
+          size = 1.2, col = "gray40")+
+ # geom_point(data = xy, aes(x = x, y = y), shape = 16, col = "#7ecdb5", size = 2, alpha = 0.25) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.15) +
+#  geom_smooth(data = xy, aes(x = trans(x), y = y), 
+ #             method = "lm", span = 2/3, linetype = "solid", se = FALSE, col = "#E6A0C4", size = 1.2) +
+  geom_hline(yintercept = 0, lty = "dashed", size = 1)+
+labs(
+  x = "Cover crop termination timing",
+  y = "Weed density (4 WAP)") + # not convinced I like this label
+ theme_light() +
+  theme(
+       axis.text.x = element_text(size=8), 
+        axis.text.y = element_text(size=7.5, margin = margin(r = -0.5)),
+        axis.title.y = element_text(size=10, margin = margin(r = -0.5)), 
+        axis.title.x = element_text(size=10),
+       legend.position = "none",
+       legend.spacing.x = unit(10, "pt"),
+       legend.text = element_text(size = 8),
+       legend.title = element_text(size = 9),
+       legend.key.size = unit(0.5, "cm"),
+       legend.key.spacing.y = unit(0, "pt"),
+       legend.box.margin = margin(-5, -5, -5, -5))+
+  guides(col = guide_legend(nrow = 3, byrow = TRUE))
+lnrr_dpp_sc_effects
+ggsave("ttondensity.png", width = 2.5, height = 2.5, units = "in", dpi = 300)
+```
+
+
+
+```{r}
+dat <- na.omit(final_data[, c("lnRR_4WAP", "ccbm_sc", "DPP_sc")])
+
+y_resid <- resid(lm(lnRR_4WAP ~ ccbm_sc, data = dat))
+x_resid <- resid(lm(DPP_sc ~ ccbm_sc, data = dat))
+
+plot(x_resid, y_resid)
+
+plot <- ggplot(dat, aes(x = x_resid, y = y_resid)) +
+  geom_point(data = dat, aes(x = x_resid, y = y_resid),
+            shape = 16, col = "gray", size = 2, alpha = 0.25)+
+
+
+#geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.15) +
+  geom_hline(yintercept = 0, lty = "dashed", size = 0.5)+
+  geom_smooth(method = "lm", se = TRUE, 
+          size = 1.2, col = "gray45")+
+labs(
+  x = "Cover crop termination timing",
+  y = "Weed density (LRR; 4 WAP)") + # not convinced I like this label
+ theme_light() +
+  theme(
+       axis.text.x = element_text(size=8), 
+        axis.text.y = element_text(size=7.5, margin = margin(r = -0.5)),
+        axis.title.y = element_text(size=10, margin = margin(r = -0.5)), 
+        axis.title.x = element_text(size=10),
+       legend.position = "none",
+       legend.spacing.x = unit(10, "pt"),
+       legend.text = element_text(size = 8),
+       legend.title = element_text(size = 9),
+       legend.key.size = unit(0.5, "cm"),
+       legend.key.spacing.y = unit(0, "pt"),
+       legend.box.margin = margin(-5, -5, -5, -5))+
+  guides(col = guide_legend(nrow = 3, byrow = TRUE))
+plot
+ggsave("residuals.png", width = 2.5, height = 2.5, units = "in", dpi = 300)
+```
+
+
+## Temporal dynamics
+
+I will be repeating the above process for the next pSEM which includes mid- and end- of season weed density
+
+There will be 3 component models
+
+3. cover crop biomass ~ termination timing
+2. Weed density mid season ~ cover crop biomass
+1. Weed density end season ~ Weed density mid season
+
+Removing specific outliers
+```{r}
+#x11()
+#plot(final_data$DPP, final_data$lnRR_harvest, pch=19, cex=2, col="goldenrod")
+
+# identify points
+#idx <- identify(final_data$DPP, final_data$lnRR_harvest, labels = final_data$plotID)
+
+# confirm
+#final_data[idx, c("plotID", "DPP", "lnRR_harvest")]
+
+# remove by row
+
+final_data <- subset(final_data, !(final_data$plotID %in% c("L92LW", "D93LW", "M86LW", "M04LW")))
+
+ggplot(final_data, aes(x = DPP, y = lnRR_4WAP, color = state)) +
+  geom_point(size = 2, alpha = 0.4) +
+  geom_smooth(method = "lm", fullrange = TRUE, size = 1, alpha = 0.2) +
+  theme_light()
+```
+
+
+### Model 3 (cover crop biomass ~ days pre planting)
+
+Same as above model 1
+
+```{r eval = FALSE}
+mod1 <- lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_data, na.action = na.omit) #slope correlated
+mod1a <- lmer(ccbm_sc ~ DPP_sc + (DPP_sc || sy), data = final_data) # uncorrelated random effects
+anova(mod1a, mod1) # correlated is better!
+summary(mod1)
+```
+
+### Model 4 (weeds mid ~ cover crop biomass)
+
+Same as above model 2
+
+
+```{r}
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit) #slope correlated
+mod2a <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_data) # uncorrelated random effects
+anova(mod2a, mod2) # correlated is better!
+
+mod2b <- lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc | sy), data = final_data) # remove dpp
+anova(mod2b, mod2) # on the edge here
+
+summary(mod2)
+```
+
+### Model 5 (weeds end ~ weeds mid)
+
+
+```{r}
+mod5 <- lmer(lnRR_harvest ~ lnRR_4WAP + ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit)
+#slope correlated
+#singularity
+anova(mod5) # non significant ccbm fixed
+mod5b <- lmer(lnRR_harvest ~ lnRR_4WAP + DPP_sc + (ccbm_sc | sy),data = final_data) # remove ccbm
+anova(mod5b, mod5) # no difference
+anova(mod5b)
+
+mod5 <- lmer(lnRR_harvest ~ lnRR_4WAP + ccbm_sc + DPP_sc + (ccbm_sc | sy),data = final_data) 
+mod5a <- lmer(lnRR_harvest ~ lnRR_4WAP + ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_data) # uncorrelated random effects
+#no singularity
+anova(mod5a, mod5) # correlated is better!
+#except we're still having singularities (but not lack of convergence)
+
+summary(mod5)
+```
+
+
+```{r   fig.width = 5, fig.height = 5}
+residuals <- resid(mod5)
+hist(residuals, breaks = 20, main = "Histogram of Residuals")
+ggplot(data.frame(eta = predict(mod5, type="link"), pearson = residuals(mod5, type = "pearson")),
+    aes(x = eta,y = pearson)) +
+    geom_point() +
+    theme_bw()
+qqnorm(residuals)
+qqline(residuals, col="red")
+infIndexPlot(mod5, vars = "Cook")
+dotplot(ranef(mod5))
+```
+
+
+```{r, fig.height = 15, fig.width = 10}
+re <- ranef(mod5a)$sy
+re_df <- re %>%
+  tibble::rownames_to_column("sy") %>%
+  rename(rand_intercept = `(Intercept)`)
+fix_int <- fixef(mod5a)[1]
+re_df <- re_df %>%
+  mutate(intercept = fix_int + rand_intercept)
+final_data1 <- final_data %>%
+  left_join(re_df, by = "sy")
+final_data1 <- final_data1 %>%
+  mutate(sy = reorder(sy, intercept))
+
+ggplot(final_data1, aes(x = ccbm_sc.x, y = lnRR_harvest)) +
+  geom_point(size = 2, alpha = 0.2, pch = 16) +
+  geom_smooth(method = "lm", se = TRUE,
+              fullrange = TRUE, 
+              size = 0.75, alpha = 0.5,
+              col = "seagreen1") +
+  theme_light() + 
+  theme(axis.title = element_text(size = 14),
+        legend.title = element_text(size = 14), 
+        aspect.ratio = 1.5)+
+  labs(y = "lnRR_4WAP", x = "ccbmscaled")+
+  facet_wrap(~sy)
+```
+
+
+```{r, fig.height = 15, fig.width = 10}
+re <- ranef(mod5a)$sy
+re_df <- re %>%
+  tibble::rownames_to_column("sy") %>%
+  rename(rand_intercept = `(Intercept)`)
+fix_int <- fixef(mod5a)[1]
+re_df <- re_df %>%
+  mutate(intercept = fix_int + rand_intercept)
+final_data1 <- final_data %>%
+  left_join(re_df, by = "sy")
+final_data1 <- final_data1 %>%
+  mutate(sy = reorder(sy, intercept))
+
+ggplot(final_data1, aes(x = DPP_sc, y = lnRR_harvest)) +
+  geom_point(size = 2, alpha = 0.2, pch = 16) +
+  geom_smooth(method = "lm", se = TRUE,
+              fullrange = TRUE, 
+              size = 0.75, alpha = 0.5,
+              col = "seagreen1") +
+  theme_light() + 
+  theme(axis.title = element_text(size = 14),
+        legend.title = element_text(size = 14), 
+        aspect.ratio = 1.5)+
+  labs(y = "lnRR_4WAP", x = "ccbmscaled")+
+  facet_wrap(~sy)
+```
+
+
+### PSEM
+
+Starting-- most basic, no end-season density
+
+DPP -> ccbm 
+ccbm -> lnrr_mid
+lnrr_mid -> lnrr_end
+```{r}
+psemDensity2 <- psem(
+  lmer(lnRR_harvest ~ lnRR_4WAP + (ccbm_sc || sy), data = final_data, na.action = na.omit),
+  lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_data, na.action = na.omit)
+)
+
+dSep(psemDensity2, .progressBar = FALSE)
+#  p values v small
+fisherC(psemDensity2)
+#Fisher's: 18.514	 on 6 df, p = 0.005
+summary(psemDensity2)
+```
+
+
+DPP -> ccbm 
+ccbm + DPP -> lnrr_mid
+lnrr_mid -> lnrr_end
+```{r}
+psemDensity3 <- psem(
+  lmer(lnRR_harvest ~ lnRR_4WAP + (ccbm_sc || sy), data = final_data, na.action = na.omit),
+  lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_data, na.action = na.omit)
+)
+
+dSep(psemDensity3, .progressBar = FALSE)
+# still small p value
+fisherC(psemDensity3)
+# Fisher's C 9.271	on 4 df p = 0.055
+summary(psemDensity3)
+```
+
+DPP -> ccbm 
+ccbm -> lnrr_mid
+lnrr_mid + ccbm -> lnrr_end
+```{r}
+psemDensity4 <- psem(
+  lmer(lnRR_harvest ~ lnRR_4WAP + ccbm_sc + (ccbm_sc || sy), data = final_data, na.action = na.omit),
+  lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_data, na.action = na.omit)
+)
+
+dSep(psemDensity4, .progressBar = FALSE)
+# still small p value
+fisherC(psemDensity4)
+# Fisher's C 11.647	on 4 df p = 0.02	
+summary(psemDensity4)
+```
+
+
+DPP -> ccbm 
+ccbm + DPP -> lnrr_mid
+lnrr_mid + ccbm -> lnrr_end
+```{r}
+psemDensity5 <- psem(
+  lmer(lnRR_harvest ~ lnRR_4WAP + (ccbm_sc || sy), data = final_data, na.action = na.omit),
+  lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_data, na.action = na.omit)
+)
+
+dSep(psemDensity5, .progressBar = FALSE)
+# still small p value
+fisherC(psemDensity5)
+# Fisher's C 6.286	on 2 df p = 0.043		
+summary(psemDensity5)
+```
+
+DPP -> ccbm 
+ccbm + DPP -> lnrr_mid
+lnrr_mid + ccbm + DPP -> lnrr_end
+```{r}
+psemDensity6 <- psem(
+  lmer(lnRR_harvest ~ lnRR_4WAP + ccbm_sc + (ccbm_sc || sy), data = final_data, na.action = na.omit),
+  lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_data, na.action = na.omit)
+)
+
+dSep(psemDensity6, .progressBar = FALSE)
+# saturated
+fisherC(psemDensity6)
+# saturated
+summary(psemDensity6)
+```
+
+
+DPP -> ccbm 
+ccbm + DPP -> lnrr_mid
+lnrr_mid + ccbm + DPP -> lnrr_end
+```{r}
+psemDensity7 <- psem(
+  lmer(lnRR_harvest ~ lnRR_4WAP + ccbm_sc + DPP_sc +(ccbm_sc || sy), data = final_data, na.action = na.omit),
+  lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_data, na.action = na.omit)
+)
+
+dSep(psemDensity7, .progressBar = FALSE)
+# saturated
+fisherC(psemDensity7)
+# saturated
+summary(psemDensity7)
+```
+
+
+Ok here both of the lnrr models have small p values but the harvest one is smaller p = 0.03 vs p = 0.05... so I'm coming back to here and will add dpp to the top model (harvest)
+```{r}
+psemDensity4 <- psem(
+  lmer(lnRR_harvest ~ lnRR_4WAP + ccbm_sc + (ccbm_sc || sy), data = final_data, na.action = na.omit),
+  lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_data, na.action = na.omit)
+)
+
+dSep(psemDensity4, .progressBar = FALSE)
+# still small p value
+fisherC(psemDensity4)
+# Fisher's C 12.729	on 4 df p = 0.013	
+summary(psemDensity4)
+```
+
+
+```{r}
+psemDensity8 <- psem(
+  lmer(lnRR_harvest ~ lnRR_4WAP + ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_data, na.action = na.omit),
+  lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc | sy), data = final_data, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_data, na.action = na.omit)
+)
+
+dSep(psemDensity8, .progressBar = FALSE)
+# 0.05
+fisherC(psemDensity8)
+# Fisher's C 5.924	on 2 df p = 0.05	
+summary(psemDensity8)
+```
+
+
+
+
+
+
+
+## Cash crop presence
+
+
+Soybean yield
+
+Starting everything from scratch
+
+```{r warning = FALSE, include = FALSE}
+#setwd("~/CCHIT 2025")
+cchit <- read_csv("biomass_master.csv") 
+cchit <- as.data.frame(cchit)
+
+cchit$state <- as.factor(cchit$state)
+cchit$year <- as.factor(cchit$year)
+cchit$plot <- as.factor(cchit$plot)
+cchit$term.trmt <- as.factor(cchit$term.trmt)
+cchit$herb.trmt <- as.factor(cchit$herb.trmt)
+cchit$region <- as.factor(cchit$region)
+cchit$DPP <- as.numeric(cchit$DPP) 
+cchit$sy <- interaction(cchit$state, cchit$year) 
+cchit$plotID <- as.factor(cchit$plotID)
+
+str(cchit)
+
+cchit <- cchit %>% dplyr::rename(ccbm = "cc.bm.kgha", yield = "yield.kgha", weedbmh = "weed.bm.harv.kgha", weedbmt = "weed.bm.term.kgha", densityh = "density.harv.allspp.m2", densityt = "density.term.allspp.m2", sbpop = "soybean.pop.ha") 
+
+cchit$weedbmh_mg <- as.numeric(cchit$weedbmh/1000) 
+cchit$weedbmt_mg <- as.numeric(cchit$weedbmt/1000)
+cchit$ccbm_mg <- as.numeric(cchit$ccbm/1000)
+
+cchith <- subset(cchit, herb.trmt == "Weedy") # subset 
+cchith$yield_mg <- as.numeric(cchith$yield/1000)
+cchith <- cchith %>%
+ dplyr:: mutate(across(c(sy, plotID, term.trmt, herb.trmt), as.factor))
+
+group_means <- cchith %>%
+dplyr::  group_by(state, year, sy, term.trmt, plotID, DPP, ccbm_mg) %>%
+  dplyr::summarise(mean_yield = mean(yield_mg, na.rm = TRUE), .groups = "drop")
+
+group_means <- group_means %>%
+  dplyr::mutate(block = substr(plotID, 2, 3))
+
+ref <- group_means %>%
+  dplyr::filter(term.trmt == "No cover") %>%
+  dplyr::rename(ref_biomass = mean_yield) %>%
+  dplyr::select(sy, block, ref_biomass)
+
+rr_yield <- group_means %>%
+  left_join(ref, by = c("sy", "block")) %>%
+  mutate(
+    RR = mean_yield / ref_biomass,
+    lnyield = log(mean_yield + 1e-6)
+  ) %>%
+  filter(!is.na(RR), is.finite(RR))
+
+  
+rr_yield[sapply(rr_yield, is.infinite)] <- NA
+rr_yield <- na.omit(rr_yield)
+
+
+rr_yield$RR <- as.numeric(rr_yield$RR)
+rr_yield <- as.data.frame(rr_yield)
+
+rr_yield$lnyield <- log(rr_yield$mean_yield + 0.000001) 
+
+str(rr_yield)
+
+```
+
+
+Density at harvest
+
+```{r warning = FALSE}
+cchitnh <- subset(cchit, herb.trmt == "Weedy") # subset out herbicide treated
+cchitnh <- cchitnh %>%
+  dplyr::mutate(across(c(sy, plotID, term.trmt, herb.trmt), as.factor))
+
+group_means <- cchitnh %>%
+  dplyr::group_by(state, year, sy, term.trmt, plotID, DPP, ccbm_mg) %>%
+  dplyr::summarize(
+    mean_biomass = mean(densityh, na.rm = TRUE),
+    .groups = "drop"
+  ) 
+
+ref <- group_means %>%
+  dplyr::filter(term.trmt == "No cover") %>%
+  dplyr::rename(ref_biomass = mean_biomass) %>%
+   dplyr :: select(sy, plotID, ref_biomass)
+
+group_means <- group_means %>%
+  dplyr::mutate(block = substr(plotID, 2, 3))  
+ref <- ref %>%
+  dplyr::mutate(block = substr(plotID, 2, 3))
+
+rr_data <- group_means %>%
+  dplyr::left_join(ref, by = "sy", suffix = c("", "_ref")) %>%
+  dplyr::filter(!is.na(ref_biomass), !is.na(mean_biomass)) %>%
+  dplyr::mutate(RR = mean_biomass / ref_biomass) %>%
+  dplyr::select(-plotID_ref, -block_ref) 
+
+rr_data[sapply(rr_data, is.infinite)] <- NA
+rr_data <- na.omit(rr_data)
+
+
+rr_data$RR <- as.numeric(rr_data$RR)
+rr_data <- as.data.frame(rr_data)
+str(rr_data)
+
+rr_data$lnrr <- log(rr_data$RR + 0.000001) 
+```
+
+
+
+Making a new dataset with all combined
+
+```{r}
+#rr_yield <- rr_yield %>%
+ #rename(lnyield = lnrr)
+
+#rr_density <- rr_density %>%
+ # rename(lnRR_4WAP = lnRR)
+
+rr_data <- rr_data %>%
+  dplyr::rename(lnRR_harvest = lnrr)
+
+rr_yield <- rr_yield %>%
+  dplyr::mutate(across(c(sy, plotID, block), as.character))
+
+#rr_density <- rr_density %>%
+ # mutate(across(c(sy, plotID, block), as.character))
+
+rr_data <- rr_data %>%
+  dplyr::mutate(across(c(sy, plotID, block), as.character))
+
+rr_density_mean <- rr_density %>%
+  dplyr::group_by(sy, block, DPP, ccbm_mg) %>%
+  dplyr::summarise(lnRR_4WAP = mean(lnRR_4WAP, na.rm = TRUE), .groups = "drop")
+
+rr_yield_mean <- rr_yield %>%
+  dplyr::group_by(sy, block, DPP, ccbm_mg) %>%
+  dplyr::summarise(lnyield = mean(lnyield, na.rm = TRUE), .groups = "drop")
+
+final_datay <- rr_data %>%
+  left_join(rr_density_mean, by = c("sy", "block", "DPP", "ccbm_mg"))
+final_datay <- final_datay %>%
+  left_join(rr_yield_mean, by = c("sy", "block", "DPP", "ccbm_mg"))
+
+str(final_datay)
+```
+
+
+
+
+END OF SEASON WEEDS
+
+### Model 9
+```{r}
+final_datay$ccbm_sc <- as.numeric(scale(final_datay$ccbm_mg))
+final_datay$DPP_sc  <- as.numeric(scale(final_datay$DPP))
+```
+
+```{r}
+mod1 <- lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_datay, na.action = na.omit)
+```
+
+## Model 10
+```{r}
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit)
+```
+
+## Model 11 (lnrr harvest ~ lnrr mid)
+
+```{r}
+mod5a <- lmer(lnRR_harvest ~ lnRR_4WAP + ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_datay)
+```
+
+## Model 11.5 (lnrr harvest ~ ccbm)
+
+Per previous suggestions not doing both weed density timings 
+
+```{r}
+mod11_5 <- lmer(lnRR_harvest ~ ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_datay)
+mod11_5a <- lmer(lnRR_harvest ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay)
+anova(mod11_5, mod11_5a) # correlated is way better!
+summary(mod11_5a)
+anova(mod11_5a)
+```
+
+## Model 11.75 (lnRR_4WAP ~ ccbm)
+
+Per previous suggestions not doing both weed density timings 
+
+```{r}
+mod11_75 <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_datay)
+mod11_75a <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay)
+anova(mod11_75, mod11_75a) # correlated is way better!
+summary(mod11_75a)
+anova(mod11_75a)
+```
+
+
+
+
+## Model 12.5 (soybean yield ~ lnrr end)
+
+```{r}
+mod9a <- lmer(lnyield ~ lnRR_harvest + lnRR_4WAP + ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay)
+anova(mod9a) #biggest p value is 4wap
+mod9b <- lmer(lnyield ~ lnRR_harvest +  ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay)
+mod9c <- lmer(lnyield ~ lnRR_harvest +  ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_datay)
+
+anova(mod9b, mod9c)
+```
+
+P-value >0.05 as such, best model is the most parsimonious.
+
+
+```{r   fig.width = 5, fig.height = 5}
+residuals <- resid(mod9c)
+hist(residuals, breaks = 20, main = "Histogram of Residuals")
+ggplot(data.frame(eta = predict(mod9c, type="link"), pearson = residuals(mod9c, type = "pearson")),
+    aes(x = eta,y = pearson)) +
+    geom_point() +
+    theme_bw()
+qqnorm(residuals)
+qqline(residuals, col="red")
+infIndexPlot(mod9c, vars = "Cook")
+dotplot(ranef(mod9c))
+```
+
+
+
+
+
+## Model 12 (soybean yield ~ lnrr 4wap)
+
+```{r}
+mod9a <- lmer(lnyield ~ lnRR_4WAP + ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay)
+anova(mod9a) #biggest p value is 4wap
+mod9b <- lmer(lnyield ~ lnRR_4WAP +  ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay)
+mod9c <- lmer(lnyield ~ lnRR_4WAP +  ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_datay)
+
+anova(mod9b, mod9c)
+```
+
+P-value >0.05 as such, best model is the most parsimonious.
+
+
+
+
+```{r}
+Q1 <- quantile(residuals, 0.25)
+Q3 <- quantile(residuals, 0.75)
+IQR <- Q3 - Q1
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+outliers <- which(residuals < lower_bound | residuals > upper_bound)
+
+final_datay <- final_datay[-outliers, ]
+```
+
+```{r}
+mod9c <- lmer(lnyield ~ lnRR_4WAP +  ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_datay)
+residuals <- resid(mod9c)
+hist(residuals, breaks = 20, main = "Histogram of Residuals")
+ggplot(data.frame(eta = predict(mod9c, type="link"), pearson = residuals(mod9c, type = "pearson")),
+    aes(x = eta,y = pearson)) +
+    geom_point() +
+    theme_bw()
+qqnorm(residuals)
+qqline(residuals, col="red")
+infIndexPlot(mod9c, vars = "Cook")
+dotplot(ranef(mod9c))
+```
+
+
+
+
+### PSEM
+
+Starting-- most basic, no mid-season density
+
+
+```{r}
+psemDensity2 <- psem(
+  lmer(lnyield ~ lnRR_harvest + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(lnRR_harvest ~ ccbm_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_datay, na.action = na.omit)
+)
+
+dSep(psemDensity2, .progressBar = FALSE)
+# 3 p values v small
+fisherC(psemDensity2)
+#Fisher's: 94.036	on 6 df, p = 0
+summary(psemDensity2)
+```
+
+
+
+```{r}
+psemDensity3 <- psem(
+  lmer(lnyield ~ lnRR_harvest + DPP_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(lnRR_harvest ~ ccbm_sc+ (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_datay, na.action = na.omit)
+)
+
+dSep(psemDensity3, .progressBar = FALSE)
+# still small p value
+fisherC(psemDensity3)
+
+summary(psemDensity3)
+```
+
+
+```{r}
+psemDensity4 <- psem(
+  lmer(lnyield ~ lnRR_harvest + ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(lnRR_harvest ~ ccbm_sc  + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_datay, na.action = na.omit)
+)
+
+dSep(psemDensity4, .progressBar = FALSE)
+# still small p value
+fisherC(psemDensity4)
+
+summary(psemDensity4)
+```
+
+
+```{r}
+psemDensity5 <- psem(
+  lmer(lnyield ~ lnRR_harvest + ccbm_sc +  DPP_sc + (ccbm_sc || sy), data = final_datay, na.action = na.omit),
+  lmer(lnRR_harvest ~ ccbm_sc  + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_datay, na.action = na.omit)
+)
+
+dSep(psemDensity5, .progressBar = FALSE)
+# still small p value
+fisherC(psemDensity5)
+
+summary(psemDensity5)
+```
+
+
+```{r}
+psemDensity6 <- psem(
+  lmer(lnyield ~ lnRR_harvest + ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_datay, na.action = na.omit),
+  lmer(lnRR_harvest ~ ccbm_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_datay, na.action = na.omit)
+)
+
+dSep(psemDensity6, .progressBar = FALSE)
+# saturated
+fisherC(psemDensity6)
+# saturated
+summary(psemDensity6)
+```
+
+
+```{r}
+psemDensity6 <- psem(
+  lmer(lnyield ~ lnRR_harvest + ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_datay, na.action = na.omit),
+  lmer(lnRR_harvest ~ ccbm_sc + DPP_sc+ (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_datay, na.action = na.omit)
+)
+
+dSep(psemDensity6, .progressBar = FALSE)
+# saturated
+fisherC(psemDensity6)
+# saturated
+summary(psemDensity6)
+```
+
+
+
+## PSEM 
+Mid season this time ig
+
+
+```{r}
+psemDensity2 <- psem(
+  lmer(lnyield ~ lnRR_4WAP + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_datay, na.action = na.omit)
+)
+
+dSep(psemDensity2, .progressBar = FALSE)
+# 3 p values v small
+fisherC(psemDensity2)
+#Fisher's: 74.059	on 6 df, p = 0
+summary(psemDensity2)
+```
+
+
+
+```{r}
+psemDensity3 <- psem(
+  lmer(lnyield ~ lnRR_4WAP + ccbm_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(lnRR_4WAP ~ ccbm_sc+ (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_datay, na.action = na.omit)
+)
+
+dSep(psemDensity3, .progressBar = FALSE)
+# still small p value
+fisherC(psemDensity3)
+# 79.501	 4df p < 0.001
+summary(psemDensity3)
+```
+
+
+```{r}
+psemDensity4 <- psem(
+  lmer(lnyield ~ lnRR_4WAP + ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_datay, na.action = na.omit)
+)
+
+dSep(psemDensity4, .progressBar = FALSE)
+# still small p value
+fisherC(psemDensity4)
+# 7.314 2df p = 0.017
+summary(psemDensity4)
+
+basisSet(psemDensity4)
+dSep(psemDensity4)
+```
+
+
+```{r}
+psemDensity5 <- psem(
+  lmer(lnyield ~ lnRR_4WAP + ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_datay, na.action = na.omit)
+)
+
+dSep(psemDensity5, .progressBar = FALSE)
+
+fisherC(psemDensity5)
+
+summary(psemDensity5)
+```
+
+
+### Figures
+
+```{r}
+mod9b <- lmer(lnyield ~ lnRR_4WAP +  ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay)
+
+
+valid_sy <- unique(mod9c@frame$sy) #just site years in mod2
+
+newdat <- expand.grid(
+  ccbm_sc = seq(min(final_datay$ccbm_sc, na.rm = TRUE),
+                max(final_datay$ccbm_sc, na.rm = TRUE),
+                length.out = 100),
+  DPP_sc = mean(final_datay$DPP_sc, na.rm = TRUE),
+  lnRR_4WAP = mean(final_datay$lnRR_4WAP, na.rm = TRUE), 
+  sy = valid_sy
+)
+newdat$pred_sy <- predict(mod9b, newdata = newdat, re.form = NULL)
+
+newdat$pred_pop <- predict(mod9b, newdata = newdat, re.form = NA)
+
+pred_int2 <- predictInterval(
+  mod9b,
+  newdata = newdat,
+  level = 0.95, #seems fine
+  n.sims = 1000, #runs fast?? good enough
+  stat = "mean",
+  include.resid.var = FALSE,
+  which = "fixed"  # we only want the confidence interval for the population line not the site year lines
+)
+
+newdat$fit   <- pred_int2$fit
+newdat$lwr   <- pred_int2$lwr
+newdat$upr   <- pred_int2$upr
+
+figure5b <- ggplot() +
+  # Site-year lines (colored)
+  geom_line(data = newdat,
+            aes(x = ccbm_sc, y = pred_sy, color = sy),
+            size = 0.75, alpha = 0.4) +
+  geom_line(data = newdat,
+            aes(x = ccbm_sc, y = pred_pop),
+            color = "black", size = 1.5) +
+  geom_ribbon(data = newdat,
+            aes(x = ccbm_sc, ymin = lwr, ymax = upr),
+            fill = "gray30", alpha = 0.4) +
+  labs(x = "Cover crop biomass",
+       y = "Soybean Yield", 
+       color = "Site-year") + 
+  theme_light () + 
+  scale_color_manual(values = c("#7294D4", "#7294D4",  #delaware
+                                "#FAD510", "#FAD510", #illinois
+                                "#C52E19",  #louisiana
+                                "#046C9A", #maryland
+                                "#F3DF6C", #minnesota
+                                "#FBA72A", "#FBA72A", #missouri
+                                "#CEAB07", "#CEAB07", "#CEAB07",#nebraska
+                                
+                                "#85D4E3", "#85D4E3", "#85D4E3")) + #virginia
+  theme(
+       axis.text.x = element_text(size=10), 
+        axis.text.y = element_text(size=10),
+        axis.title.y = element_text(size=10), 
+        axis.title.x = element_text(size=10),
+       legend.position = "none",
+       legend.spacing.x = unit(5, "pt"),
+       legend.text = element_text(size = 7),
+       legend.title = element_text(size = 8),
+       legend.key.size = unit(0.2, "cm"),
+       legend.key.spacing.y = unit(0.1, "cm"),
+       legend.box.margin = margin(-5, -5, -5, -5))+
+  guides(col = guide_legend(nrow = 3, byrow = TRUE, title.position = "top", title.hjust = 0.5))
+
+figure5b
+
+#work out some save details 
+ggsave("figure5biomass.png", width = 2.5, height = 2, units = "in", dpi = 300)
+```
+
+
+
+```{r}
+mod9b <- lmer(lnyield ~ lnRR_harvest + ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay)
+
+
+valid_sy <- unique(mod9b@frame$sy) #just site years in mod2
+
+newdat <- expand.grid(
+  ccbm_sc = seq(min(final_datay$ccbm_sc, na.rm = TRUE),
+                max(final_datay$ccbm_sc, na.rm = TRUE),
+                length.out = 100),
+  DPP_sc = mean(final_datay$DPP_sc, na.rm = TRUE),
+  lnRR_harvest = mean(final_datay$lnRR_harvest, na.rm = TRUE), 
+  #lnRR_4WAP = mean(final_datay$lnRR_4WAP, na.rm = TRUE),
+  sy = valid_sy
+)
+newdat$pred_sy <- predict(mod9b, newdata = newdat, re.form = NULL)
+
+newdat$pred_pop <- predict(mod9b, newdata = newdat, re.form = NA)
+
+pred_int2 <- predictInterval(
+  mod9b,
+  newdata = newdat,
+  level = 0.95, #seems fine
+  n.sims = 1000, #runs fast?? good enough
+  stat = "mean",
+  include.resid.var = FALSE,
+  which = "fixed"  # we only want the confidence interval for the population line not the site year lines
+)
+
+newdat$fit   <- pred_int2$fit
+newdat$lwr   <- pred_int2$lwr
+newdat$upr   <- pred_int2$upr
+
+figure5b_end <- ggplot() +
+  # Site-year lines (colored)
+  geom_line(data = newdat,
+            aes(x = ccbm_sc, y = pred_sy, color = sy),
+            size = 0.75, alpha = 0.4) +
+  geom_line(data = newdat,
+            aes(x = ccbm_sc, y = pred_pop),
+            color = "black", size = 1.5) +
+  geom_ribbon(data = newdat,
+            aes(x = ccbm_sc, ymin = lwr, ymax = upr),
+            fill = "gray30", alpha = 0.4) +
+  labs(x = "Cover crop biomass",
+       y = "Soybean Yield", 
+       color = "Site-year") + 
+  theme_light () + 
+  scale_color_manual(values = c("#7294D4", "#7294D4",   #delaware
+                                "#FAD510", "#FAD510", #illinois
+                                "#C52E19",  #louisiana
+                                "#046C9A",  #maryland
+                                "#F3DF6C", #minnesota
+                                "#FBA72A", "#FBA72A", #missouri
+                                "#CEAB07", "#CEAB07", "#CEAB07", #nebraska
+                                
+                                "#85D4E3", "#85D4E3", "#85D4E3")) + #virginia
+  theme(
+       axis.text.x = element_text(size=10), 
+        axis.text.y = element_text(size=10),
+        axis.title.y = element_text(size=10), 
+        axis.title.x = element_text(size=10),
+       legend.position = "none",
+       legend.spacing.x = unit(5, "pt"),
+       legend.text = element_text(size = 7),
+       legend.title = element_text(size = 8),
+       legend.key.size = unit(0.2, "cm"),
+       legend.key.spacing.y = unit(0.1, "cm"),
+       legend.box.margin = margin(-5, -5, -5, -5))+
+  guides(col = guide_legend(nrow = 3, byrow = TRUE, title.position = "top", title.hjust = 0.5))
+
+figure5b_end
+
+#work out some save details 
+ggsave("figure_endseason.png", width = 2.5, height = 2, units = "in", dpi = 300)
+```
+
+
+
+
+
+
+
+
+
+
+MID SEASON WEEDS
+
+### Model 9
+```{r}
+final_datay$ccbm_sc <- as.numeric(scale(final_datay$ccbm_mg))
+final_datay$DPP_sc  <- as.numeric(scale(final_datay$DPP))
+```
+
+```{r}
+mod1 <- lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_datay, na.action = na.omit)
+```
+
+## Model 10
+```{r}
+mod2 <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit)
+```
+
+## Model 11 (lnrr harvest ~ lnrr mid)
+
+```{r}
+mod5a <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_datay)
+```
+
+# Model 11.5 (lnrr harvest ~ ccbm)
+
+Per previous suggestions not doing both weed density timings 
+
+```{r}
+mod11_5 <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_datay)
+mod11_5a <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay)
+anova(mod11_5, mod11_5a) # correlated is way better!
+summary(mod11_5a)
+anova(mod11_5a)
+```
+
+## Model 12 (soybean yield ~ lnrr end)
+
+```{r}
+mod9a <- lmer(lnyield ~ lnRR_4WAP + ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay)
+anova(mod9a) 
+mod9b <- lmer(lnyield ~ lnRR_4WAP +  ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay)
+mod9c <- lmer(lnyield ~ lnRR_4WAP +  ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_datay)
+
+anova(mod9b, mod9c)
+```
+
+P-value >0.05 as such, best model is the most parsimonious.
+
+
+
+```{r   fig.width = 5, fig.height = 5}
+residuals <- resid(mod9c)
+hist(residuals, breaks = 20, main = "Histogram of Residuals")
+ggplot(data.frame(eta = predict(mod9c, type="link"), pearson = residuals(mod9c, type = "pearson")),
+    aes(x = eta,y = pearson)) +
+    geom_point() +
+    theme_bw()
+qqnorm(residuals)
+qqline(residuals, col="red")
+infIndexPlot(mod9c, vars = "Cook")
+dotplot(ranef(mod9c))
+```
+
+```{r}
+Q1 <- quantile(residuals, 0.25)
+Q3 <- quantile(residuals, 0.75)
+IQR <- Q3 - Q1
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+outliers <- which(residuals < lower_bound | residuals > upper_bound)
+
+final_datay <- final_datay[-outliers, ]
+```
+
+```{r}
+mod9c <- lmer(lnyield ~ lnRR_4WAP +  ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_datay)
+residuals <- resid(mod9c)
+hist(residuals, breaks = 20, main = "Histogram of Residuals")
+ggplot(data.frame(eta = predict(mod9c, type="link"), pearson = residuals(mod9c, type = "pearson")),
+    aes(x = eta,y = pearson)) +
+    geom_point() +
+    theme_bw()
+qqnorm(residuals)
+qqline(residuals, col="red")
+infIndexPlot(mod9c, vars = "Cook")
+dotplot(ranef(mod9c))
+```
+
+
+
+
+### PSEM
+
+Starting-- most basic, no mid-season density
+
+
+```{r}
+psemDensity2 <- psem(
+  lmer(lnyield ~ lnRR_4WAP + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_datay, na.action = na.omit)
+)
+
+dSep(psemDensity2, .progressBar = FALSE)
+# 3 p values v small
+fisherC(psemDensity2)
+
+summary(psemDensity2)
+```
+
+
+
+```{r}
+psemDensity3 <- psem(
+  lmer(lnyield ~ lnRR_4WAP + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_datay, na.action = na.omit)
+)
+
+dSep(psemDensity3, .progressBar = FALSE)
+# still small p value
+fisherC(psemDensity3)
+
+summary(psemDensity3)
+```
+
+
+```{r}
+psemDensity4 <- psem(
+  lmer(lnyield ~ lnRR_4WAP + ccbm_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_datay, na.action = na.omit)
+)
+
+dSep(psemDensity4, .progressBar = FALSE)
+# still small p value
+fisherC(psemDensity4)
+
+summary(psemDensity4)
+```
+
+
+```{r}
+psemDensity5 <- psem(
+  lmer(lnyield ~ lnRR_4WAP + ccbm_sc + (ccbm_sc || sy), data = final_datay, na.action = na.omit),
+  lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_datay, na.action = na.omit)
+)
+
+dSep(psemDensity5, .progressBar = FALSE)
+# still small p value
+fisherC(psemDensity5)
+
+summary(psemDensity5)
+```
+
+
+```{r}
+psemDensity6 <- psem(
+  lmer(lnyield ~ lnRR_4WAP + ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_datay, na.action = na.omit),
+  lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay, na.action = na.omit),
+  lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_datay, na.action = na.omit)
+)
+
+dSep(psemDensity6, .progressBar = FALSE)
+# saturated
+fisherC(psemDensity6)
+# saturated
+summary(psemDensity6)
+```
+
+
+### Figures
+
+
+
+
+
+```{r}
+mod9b <- lmer(lnyield ~ lnRR_4WAP +  ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay)
+
+
+valid_sy <- unique(mod9c@frame$sy) #just site years in mod2
+
+newdat <- expand.grid(
+  DPP_sc = seq(min(final_datay$DPP_sc, na.rm = TRUE),
+                max(final_datay$DPP_sc, na.rm = TRUE),
+                length.out = 100),
+  ccbm_sc = mean(final_datay$ccbm_sc, na.rm = TRUE),
+  lnRR_4WAP = mean(final_datay$lnRR_4WAP, na.rm = TRUE), 
+  sy = valid_sy
+)
+newdat$pred_sy <- predict(mod9b, newdata = newdat, re.form = NULL)
+
+newdat$pred_pop <- predict(mod9b, newdata = newdat, re.form = NA)
+
+pred_int2 <- predictInterval(
+  mod9b,
+  newdata = newdat,
+  level = 0.95, #seems fine
+  n.sims = 1000, #runs fast?? good enough
+  stat = "mean",
+  include.resid.var = FALSE,
+  which = "fixed"  # we only want the confidence interval for the population line not the site year lines
+)
+
+newdat$fit   <- pred_int2$fit
+newdat$lwr   <- pred_int2$lwr
+newdat$upr   <- pred_int2$upr
+
+figure5c <- ggplot() +
+  # Site-year lines (colored)
+  geom_line(data = newdat,
+            aes(x = DPP_sc, y = pred_sy, color = sy),
+            size = 0.75, alpha = 0.4) +
+  geom_line(data = newdat,
+            aes(x = DPP_sc, y = pred_pop),
+            color = "black", size = 1.5) +
+  geom_ribbon(data = newdat,
+            aes(x = DPP_sc, ymin = lwr, ymax = upr),
+            fill = "gray30", alpha = 0.4) +
+  labs(x = "Termination timing",
+       y = "Soybean Yield", 
+       color = "Site-year") + 
+  theme_light () + 
+  scale_color_manual(values = c("#7294D4", "#7294D4",  #delaware
+                                "#FAD510", "#FAD510", #illinois
+                                "#C52E19",  #louisiana
+                                "#046C9A", #maryland
+                                "#F3DF6C", #minnesota
+                                "#FBA72A", "#FBA72A", #missouri
+                                "#CEAB07", "#CEAB07", "#CEAB07",#nebraska
+                                
+                                "#85D4E3", "#85D4E3", "#85D4E3")) + #virginia
+  theme(
+       axis.text.x = element_text(size=10), 
+        axis.text.y = element_text(size=10),
+        axis.title.y = element_text(size=10), 
+        axis.title.x = element_text(size=10),
+       legend.position = "none",
+       legend.spacing.x = unit(10, "pt"),
+       legend.text = element_text(size = 8),
+       legend.title = element_text(size = 9),
+       legend.key.size = unit(0.5, "cm"),
+       legend.key.spacing.y = unit(0, "pt"),
+       legend.box.margin = margin(-5, -5, -5, -5))+
+  guides(col = guide_legend(nrow = 3, byrow = TRUE))
+
+
+figure5c
+
+ggsave("figure5termtiming.png", width = 3, height = 2.5, units = "in", dpi = 300)
+```
+
+
+```{r}
+mod9b <- lmer(lnyield ~ lnRR_harvest +  ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_datay)
+
+
+valid_sy <- unique(mod9c@frame$sy) #just site years in mod2
+
+newdat <- expand.grid(
+  lnRR_harvest = seq(min(final_datay$lnRR_harvest, na.rm = TRUE),
+                max(final_datay$lnRR_harvest, na.rm = TRUE),
+                length.out = 100),
+  DPP_sc = mean(final_datay$DPP_sc, na.rm = TRUE),
+  ccbm_sc = mean(final_datay$ccbm_sc, na.rm = TRUE), 
+  sy = valid_sy
+)
+newdat$pred_sy <- predict(mod9b, newdata = newdat, re.form = NULL)
+
+newdat$pred_pop <- predict(mod9b, newdata = newdat, re.form = NA)
+
+pred_int2 <- predictInterval(
+  mod9b,
+  newdata = newdat,
+  level = 0.95, #seems fine
+  n.sims = 1000, #runs fast?? good enough
+  stat = "mean",
+  include.resid.var = FALSE,
+  which = "fixed"  # we only want the confidence interval for the population line not the site year lines
+)
+
+newdat$fit   <- pred_int2$fit
+newdat$lwr   <- pred_int2$lwr
+newdat$upr   <- pred_int2$upr
+
+figure5d <- ggplot() +
+  # Site-year lines (colored)
+  geom_line(data = newdat,
+            aes(x = lnRR_harvest, y = pred_sy, color = sy),
+            size = 0.75, alpha = 0.4) +
+  geom_line(data = newdat,
+            aes(x = lnRR_harvest, y = pred_pop),
+            color = "black", size = 1.5) +
+  geom_ribbon(data = newdat,
+            aes(x = lnRR_harvest, ymin = lwr, ymax = upr),
+            fill = "gray30", alpha = 0.4) +
+  labs(x = "lnRR_harvest",
+       y = "Soybean Yield (natural logarithmically transformed)", 
+       color = "Site-year") + 
+  theme_light () + 
+  scale_color_manual(values = c("#7294D4", "#7294D4", "#7294D4", "#7294D4", #delaware
+                                "#FAD510", "#FAD510", "#FAD510", #illinois
+                                "#C52E19",  #louisiana
+                                "#046C9A", "#046C9A", "#046C9A", #maryland
+                                "#F3DF6C", "#F3DF6C", "#F3DF6C", "#F3DF6C", #minnesota
+                                "#FBA72A", "#FBA72A", "#FBA72A", #missouri
+                                "#CEAB07", "#CEAB07", "#CEAB07", "#CEAB07",#nebraska
+                                "#972D15", #texas
+                                "#85D4E3", "#85D4E3", "#85D4E3")) + #virginia
+ 
+   
+  theme(
+       axis.text.x = element_text(size=10), 
+        axis.text.y = element_text(size=10),
+        axis.title.y = element_text(size=10), 
+        axis.title.x = element_text(size=10),
+        legend.position = "none")
+
+figure5d
+
+#work out some save details 
+#ggsave("figure1bottom.png", width = 6, height = 2.5, units = "in", dpi = 300)
+```
+
+
+
+
+
