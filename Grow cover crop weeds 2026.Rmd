@@ -2,15 +2,21 @@
 title: "Cover crop weeds GROW 2026"
 author: "L Sencenbaugh"
 date: "2026-06-22"
-output: html_document
+output:
+  rmarkdown::html_document:
+    theme: hpstr
 ---
 
-An analytical framework for identifying context dependent weed responses to cover crop surface residues  
+An analytical framework for identifying interaction effects that mediate cover crop surface residue and weed response relationships in IWM studies
+
+Authors: Lilly Sencenbaugh 1, John M. Wallace 1, Eugene Law 2, Muthu Bagavathiannan 3, Kevin Bradley 4, Adam Davis 5, Wesley Everman 6, Michael Flessner 7, Nicholas Jordan 8, Lauren Lazaro 9, John Lindquist 10, Jason Norsworthy 11, Mark VanGessel 12, and Steven B. Mirsky 13
+
+1 Associate Professor and Post-doctoral scholar, Plant Science Department, Pennsylvania State University, University Park, PA, USA; 2 Assistant Professor, Department of Horticulture and Crop Science, Ohio State University, Columbus, OH, USA; 3 Professor, Soil and Crop Sciences, Texas A&M University, College Station, TX; 4 Professor, Division of Plant Sciences, University of Missouri, Columbia, MO, USA; 5 Professor, Department of Crop Sciences, University of Illinois, Urbana, IL, USA; 6 Assistant Professor, Iowa State University, Department of Agronomy, Ames, IA, USA; 7 Professor, Virginia Tech, School of Plant and Environmental Sciences, Blacksburg, VA, USA; 8 Professor, Department of Agronomy and Plant Genetics, University of Minnesota, St. Paul, MN, USA; 9 Assistant Professor, University of Georgia; 10 Professor, University of Nebraska; 11 Professor, University of Arkansas, Department of Crop, Soil and Environmental Sciences, Fayetteville, AK, USA; 12 Professor, University of Delaware, Georgetown, DE, USA; 13 Director of Digital Agriculture, USDA-ARS Sustainable Agricultural Systems Laboratory, Beltsville, MD, USA. 
 
 
-Below code is the analytical framework applied in above paper. 
+*Introduction to study*
 
-*blurb about what we're doing*
+Managing cover crops to produce high-biomass cover crop surface residues is a promising integrated weed management strategy by reducing survival and fitness of annual weeds. Here we seek to address the context dependence that influences cover crop - weed relationships that impact management recommendations. We used piecewise structural equation models (pSEM) and hierarchical modeling procedures to discern the direction and magnitudes of interactive effects between cover crops, weeds, and soybean yield. 
 
 
 Required packages
@@ -33,7 +39,7 @@ library(broom.mixed) #random effect figures
 library(effects) #effects plots
 library(ggpubr) #plot stuff
 library(ggeffects) #plot effects
-library(semEff) #sem effects
+#library(semEff) #sem effects
 library(Gmisc) #plot stuff
 library(scales) #plot stuff
 library(grid) #plot stuff
@@ -63,7 +69,7 @@ cchit$DPP <- as.numeric(cchit$DPP) # days pre plant (negative values, more negat
 cchit$sy <- interaction(cchit$state, cchit$year) # site year by combining site*year
 cchit$plotID <- as.factor(cchit$plotID)
 
-str(cchit)
+#str(cchit)
 
 cchit <- cchit %>% 
   dplyr :: rename(ccbm = "cc.bm.kgha", 
@@ -72,7 +78,7 @@ cchit <- cchit %>%
          weedbmt = "weed.bm.term.kgha", 
          densityh = "density.harv.allspp.m2", 
          densityt = "density.term.allspp.m2", 
-         sbpop = "soybean.pop.ha") #renaming things because long names make me crazy
+         sbpop = "soybean.pop.ha") #renaming 
 
 # converting biomass in kilograms to megagrams
 cchit$weedbmh_mg <- as.numeric(cchit$weedbmh/1000) 
@@ -96,65 +102,33 @@ wap4$wap <- as.numeric(wap4$wap)
 wap4$sy <- interaction(wap4$state, wap4$year) # site year by combining site*year
 wap4$plotID <- as.factor(wap4$plotID)
 wap4 <- wap4 %>%
-  filter(!wap == "0") ## same thing as at termination also I think only 1 site year has this
+  filter(!wap == "0") ## same thing as at termination--only 1 site year has this
 str(wap4)
 ```
 
-```{r}
-wes_palettes <- list(
-  BottleRocket1 = c("#A42820", "#5F5647", "#9B110E", "#3F5151", "#4E2A1E", "#550307", "#0C1707"),
-  BottleRocket2 = c("#FAD510", "#CB2314", "#273046", "#354823", "#1E1E1E"),
-  Rushmore1 = c("#E1BD6D", "#EABE94", "#0B775E", "#35274A" ,"#F2300F"),
-  Rushmore = c("#E1BD6D", "#EABE94", "#0B775E", "#35274A" ,"#F2300F"),
-  Royal1 = c("#899DA4", "#C93312", "#FAEFD1", "#DC863B"),
-  Royal2 = c("#9A8822", "#F5CDB4", "#F8AFA8", "#FDDDA0", "#74A089"),
-  Zissou1 = c("#3B9AB2", "#78B7C5", "#EBCC2A", "#E1AF00", "#F21A00"),
-  Zissou1Continuous = c("#3A9AB2", "#6FB2C1", "#91BAB6", "#A5C2A3", "#BDC881", "#DCCB4E", "#E3B710", "#E79805", "#EC7A05", "#EF5703", "#F11B00"),
-  Darjeeling1 = c("#FF0000", "#00A08A", "#F2AD00", "#F98400", "#5BBCD6"),
-  Darjeeling2 = c("#ECCBAE", "#046C9A", "#D69C4E", "#ABDDDE", "#000000"),
-  Chevalier1 = c("#446455", "#FDD262", "#D3DDDC", "#C7B19C"),
-  FantasticFox1 = c("#DD8D29", "#E2D200", "#46ACC8", "#E58601", "#B40F20"),
-  Moonrise1 = c("#F3DF6C", "#CEAB07", "#D5D5D3", "#24281A"),
-  Moonrise2 = c("#798E87", "#C27D38", "#CCC591", "#29211F"),
-  Moonrise3 = c("#85D4E3", "#F4B5BD", "#9C964A", "#CDC08C", "#FAD77B"),
-  Cavalcanti1 = c("#D8B70A", "#02401B", "#A2A475", "#81A88D", "#972D15"),
-  GrandBudapest1 = c("#F1BB7B", "#FD6467", "#5B1A18", "#D67236"),
-  GrandBudapest2 = c("#E6A0C4", "#C6CDF7", "#D8A499", "#7294D4"),
-  IsleofDogs1 = c("#9986A5", "#79402E", "#CCBA72", "#0F0D0E", "#D9D0D3", "#8D8680"),
-  IsleofDogs2 = c("#EAD3BF", "#AA9486", "#B6854D", "#39312F", "#1C1718"),
-  FrenchDispatch = c("#90D4CC", "#BD3027", "#B0AFA2", "#7FC0C6", "#9D9C85"),
-  AsteroidCity1 = c("#0A9F9D", "#CEB175", "#E54E21", "#6C8645", "#C18748"),
-  AsteroidCity2 = c("#C52E19", "#AC9765", "#54D8B1", "#b67c3b", "#175149", "#AF4E24"),
-  AsteroidCity3 = c("#FBA72A", "#D3D4D8", "#CB7A5C", "#5785C1")
-)
-
-
-wes_yellows <- c("#FAD510", "#E1BD6D", "#9A8822", "#EBCC2A", "#E1AF00", "#E3B710", "#F2AD00", "#FDD262", "#E2D200", "#F3DF6C", "#CEAB07", "#FAD77B", "#FBA72A")
-wes_reds <- c("#A42820", "#9B110E", "#550307", "#CB2314", "#F2300F", "#C93312", "#EF5703", "#F11B00", "#FF0000", "#B40F20", "#972D15", "#FD6467", "#5B1A18", "#BD3027", "#C52E19")
-wes_blues <- c("#273046", "#899DA4", "#35274A", "#3B9AB2", "#78B7C5", "#3A9AB2", "#6FB2C1", "#91BAB6", "#5BBCD6", "#046C9A", "#ABDDDE", "#46ACC8", "#85D4E3", "#7294D4", "#90D4CC", "#7FC0C6", "#0A9F9D", "#5785C1")
-```
-
-Density at 4 weeks
+Weed density mid-season
 
 ```{r warning = FALSE}
+##creating the mid season density df
+
 sum_per <- function(x) {
-  if (all(is.na(x))) NA_real_ else sum(x, na.rm = TRUE)
+  if (all(is.na(x))) NA_real_ else sum(x, na.rm = TRUE) # have to remove NAs for the log aspect AND psem gets mad if they're in there
 }
 
 quadsize <- function(x) {
   if (all(is.na(x))) NA else first(na.omit(x))
-}
+} # some site years have different plot sizes
 
-totals <- wap4 %>%
+totals <- wap4 %>% #wap = weeks after planting
   dplyr :: group_by(sy, plotID, wap, term_trmt, herb_trmt) %>%
   dplyr :: summarise(
-    total_ct1 = sum_per(seq_ct_1),
-    total_ct2 = sum_per(seq_ct_2),
-    total_ct3 = sum_per(seq_qt_3 ),
+    total_ct1 = sum_per(seq_ct_1), #frame 1
+    total_ct2 = sum_per(seq_ct_2), #frame 2
+    total_ct3 = sum_per(seq_qt_3 ), #frame 3
     quad1_size = quadsize(seq_quad_area_1),
     quad2_size = quadsize(seq_quad_area_2),
     quad3_size = quadsize(seq_quad_3),
-    total_perm2_1 = sum_per(Count_per1m_1),
+    total_perm2_1 = sum_per(Count_per1m_1), #normalizing to 1m2
     total_perm2_2 = sum_per(Count_per1m_2),
     total_perm2_3 = sum_per(Count_per1m_3),
     .groups = "drop"
@@ -170,7 +144,7 @@ totals <- totals %>%
 
 totals_long <- totals %>%
   pivot_longer(
-    cols = c(total_perm2_1, total_perm2_2),
+    cols = c(total_perm2_1, total_perm2_2), #only texas had 3 frames
     names_to = "quadrat",
     values_to = "total_perm2"
   ) %>%
@@ -183,22 +157,23 @@ totals_long <- totals_long %>%
 
 totals_long <- as.data.frame(totals_long)
 
-totals_joined <- totals_long %>%
+totals_joined <- totals_long %>% #combine!!!
   left_join(
     cchit %>% 
       dplyr::select(sy, plotID, term.trmt, herb.trmt, DPP, ccbm_mg),
     by = c("sy", "plotID", "term.trmt", "herb.trmt")
   )
 
-totals_weedy <- totals_joined %>% filter(herb.trmt != "Standard")
+totals_weedy <- totals_joined %>% filter(herb.trmt != "Standard") #weedy totals not standard
 
 str(totals_weedy)
-
 ```
 
-Weed density mid-season
+
+We are using the log response ratio
 
 ```{r warning = FALSE}
+
 group_means <- totals_weedy %>%
   dplyr :: group_by(sy, plotID, term.trmt, DPP, ccbm_mg, wap, quadrat) %>%
   dplyr :: summarise(
@@ -206,48 +181,30 @@ group_means <- totals_weedy %>%
     .groups = "drop"
   )
 
-ref <- group_means %>% 
+ref <- group_means %>% #reference level i.e. the denominator
   dplyr :: filter(term.trmt == "No cover") %>% 
   dplyr :: rename(ref_density = mean_density) %>% 
-  dplyr :: select(sy, plotID, wap, quadrat, ref_density)
+  dplyr :: select(sy, plotID, wap, quadrat, ref_density) #wap = weeks after plant
 
 group_means <- group_means %>%
   dplyr :: mutate(block = substr(plotID, 2, 3))  
 ref <- ref %>%
   dplyr :: mutate(block = substr(plotID, 2, 3))
 
-#rr_density <- group_means %>%
-#  dplyr :: left_join(ref, by = c("sy", "block", "wap", "quadrat"), suffix = c("", "_ref")) %>%
-#  dplyr :: filter(!is.na(ref_density), !is.na(mean_density)) %>%
-#  dplyr :: mutate(
-#    RR = ifelse(ref_density == 0, NA, mean_density / ref_density),
-#    lnRR = log(RR + 0.000001) #psem needs help interpretting log (can't do it within psem code must be done prior)
-#  ) %>%
- # dplyr::select(-plotID_ref) %>% # keep the main columns tidy 
-  #filter(!is.na(lnRR), !is.infinite(lnRR), !is.nan(lnRR)) 
-
-
-#rr_density <- group_means %>%
-#  dplyr :: left_join(ref, by = "sy", suffix = c("", "_ref")) %>% #idk how to prevent the repeated columns so adding _ref as an id so it can be removed later
-#  dplyr :: filter(!is.na(ref_density), !is.na(mean_density)) %>%
-#  dplyr :: mutate(RR = mean_density / ref_density) %>%
-#  dplyr :: select(-plotID_ref, -block_ref) # keep the main columns tidy
-
-
-rr_density <- group_means %>%
-  left_join(ref, by = c("sy", "block", "wap", "quadrat"), suffix = c("", "_ref")) %>%
+rr_density <- group_means %>% #combine!
+  left_join(ref, by = c("sy", "block", "wap", "quadrat"), suffix = c("", "_ref")) %>% #added the _ref to tell apart for later
   mutate(
     RR = mean_density / ref_density,
-    lnRR = log(RR + 0.000001)
+    lnRR = log(RR + 0.000001) #log response ratio
   )
 
 
 rr_density <- as.data.frame(rr_density)
 
 rr_density <- rr_density %>%
-  dplyr :: filter(!(wap < 2), !(wap > 10))
+  dplyr :: filter(!(wap < 2), !(wap > 10)) #MID season
 
-str(rr_density)
+str(rr_density) 
 ```
 
 
@@ -266,7 +223,7 @@ group_means <- cchitnh %>%
   ) 
 
 
-ref <- group_means %>%
+ref <- group_means %>% #basically repeating above but with density at harvest!
   dplyr :: filter(term.trmt == "No cover") %>%
   dplyr :: rename(ref_biomass = mean_biomass) %>%
    dplyr :: select(sy, plotID, ref_biomass)
@@ -277,12 +234,6 @@ ref <- ref %>%
  dplyr ::  mutate(block = substr(plotID, 2, 3))
 
 
-#rr_data <- group_means %>%
- # dplyr :: left_join(ref, by = "sy", suffix = c("", "_ref")) %>% #idk how to prevent the repeated columns so adding _ref as an id so it can be removed later
-  #dplyr :: filter(!is.na(ref_biomass), !is.na(mean_biomass)) %>%
-  #dplyr :: mutate(RR = mean_biomass / ref_biomass) %>%
-  #dplyr :: select(-plotID_ref, -block_ref) # keep the main columns tidy
-
 
 rr_data <- group_means %>%
   left_join(ref, by = "sy", suffix = c("", "_ref")) %>%
@@ -291,39 +242,37 @@ rr_data <- group_means %>%
     lnrr1 = log(RR + 0.000001)
   )
 
-#rr_data[sapply(rr_data, is.infinite)] <- NA
-#rr_data <- na.omit(rr_data)
-
 
 rr_data$RR <- as.numeric(rr_data$RR)
 rr_data <- as.data.frame(rr_data)
 str(rr_data)
 
-rr_data$lnrr1 <- log(rr_data$RR + 0.000001) 
+rr_data$lnrr1 <- log(rr_data$RR + 0.000001) #log!
 
 
 
-# why are we losing NC ?
+# why are we losing site years?
 
-sum(is.nan(group_means$mean_biomass))
-group_means %>%
-  filter(is.nan(mean_biomass))
-ref %>%
-  filter(is.nan(ref_biomass))
+#sum(is.nan(group_means$mean_biomass))
+#group_means %>%
+ # filter(is.nan(mean_biomass))
+#ref %>%
+ # filter(is.nan(ref_biomass))
 
 # missing data (density)
 
 
 ```
 
+
 Making a new dataset with density at harvest and 4 weeks combined 
 
 ```{r}
 rr_data <- rr_data %>%
-  dplyr::rename(lnRR_harvest = lnrr1)
+  dplyr::rename(lnRR_harvest = lnrr1) #harvest
 
 rr_density <- rr_density %>%
- dplyr:: rename(lnRR_4WAP = lnRR)
+ dplyr:: rename(lnRR_4WAP = lnRR) #mid
 
 rr_data <- rr_data %>%
  dplyr:: mutate(across(c(sy, plotID, block), as.character))
@@ -342,21 +291,8 @@ str(final_data)
 ```
 
 
-Removing specific outliers
+Checking for specific outliers
 ```{r, warning = FALSE}
-#x11()
-#plot(final_data$DPP, final_data$lnRR_4WAP, pch=19, cex=2, col="goldenrod")
-
-# identify points
-#idx <- identify(final_data$DPP, final_data$lnRR_4WAP, labels = final_data$plotID)
-
-# confirm
-#final_data[idx, c("plotID", "DPP", "lnRR_harvest")]
-
-# remove by row
-
-#final_data <- subset(final_data, !(final_data$plotID %in% c("M73MW", "D73LW", "V02LW")))
-
 ggplot(final_data, aes(x = DPP, y = lnRR_4WAP, color = state)) +
   geom_point(size = 2, alpha = 0.4) +
   geom_smooth(method = "lm", fullrange = TRUE, size = 1, alpha = 0.2) +
@@ -371,17 +307,15 @@ For this PSEM model we have 2 component models
 1. cover crop biomass ~ days pre plant
 
 
-
-## Table 1 set up
 Scaling DPP and biomass
-
 ```{r}
 final_data$ccbm_sc <- scale(final_data$ccbm_mg)
 final_data$DPP_sc  <- scale(final_data$DPP)
 ```
 
-```{r}
 
+
+```{r}
 mod1 <- lmer(ccbm_sc ~ DPP_sc + (DPP_sc | sy), data = final_data, na.action = na.omit) #slope correlated
 mod1a <- lmer(ccbm_sc ~ DPP_sc + (DPP_sc || sy), data = final_data) # uncorrelated random effects
 anova(mod1a, mod1) # correlated is better!
@@ -391,6 +325,8 @@ Anova(mod1, type = "III", test = "Chisq")
 ```
 
 
+#### Table 1 
+
 ```{r}
 final_data1 <- final_data %>%
   filter(!is.na(lnRR_4WAP), !is.infinite(lnRR_4WAP), !is.nan(lnRR_4WAP)) 
@@ -399,8 +335,7 @@ final_data1 <- final_data %>%
 
 mod2 <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc | sy), data = final_data1, na.action = na.omit) #slope correlated
 mod2a <- lmer(lnRR_4WAP ~ ccbm_sc + DPP_sc + (ccbm_sc || sy), data = final_data1) # uncorrelated random effects
-anova(mod2a, mod2) # correlated is better!
-
+anova(mod2a, mod2) 
 
 
 mod2c <- lm(lnRR_4WAP ~ ccbm_sc, data = final_data1 )
@@ -413,12 +348,12 @@ summary(mod2d)
 AIC(mod2d)
 r2(mod2d)
 
-mod2b <- lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc | sy), data = final_data1) # remove dpp
+mod2b <- lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc | sy), data = final_data1) 
 summary(mod2b)
 r2(mod2b)
 AIC(mod2b)
 
-mod2e <- lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc || sy), data = final_data1) # remove dpp
+mod2e <- lmer(lnRR_4WAP ~ ccbm_sc + (ccbm_sc || sy), data = final_data1) 
 summary(mod2e)
 r2(mod2e)
 AIC(mod2e)
@@ -426,94 +361,14 @@ AIC(mod2e)
 
 anova(mod2b, mod2e)
 
-#anova(mod2b, mod2) # on the edge here
-
 summary(mod2)
 VarCorr(mod2)
 Anova(mod2, type = "III", test.statistic = "Chisq")
 ```
 
-## Figure 2 (top)
-Box 1:
 
-```{r}
-rd1 <- broom.mixed::tidy(mod1, effects = "ran_vals", conf.int = TRUE, response = TRUE)
-rd1 <- as.data.frame(rd1) 
-interceptd1 <- subset(rd1, term == "(Intercept)")
-sloped1 <- subset(rd1, term == "DPP_sc")
-sloped1$slope <- sloped1$estimate
-sloped1$slope.low <- sloped1$conf.low
-sloped1$slope.high <- sloped1$conf.high
-df.biplotd1 <- cbind(interceptd1, sloped1$slope, sloped1$slope.low, sloped1$slope.high)
-df.biplotd1 <- as.data.frame(df.biplotd1)
+## Figure 1
 
-wes_yellows <- c("#FAD510", "#E1BD6D", "#9A8822", "#EBCC2A", "#E1AF00", "#E3B710", "#F2AD00", "#FDD262", "#E2D200", "#F3DF6C", "#CEAB07", "#FAD77B", "#FBA72A")
-wes_reds <- c("#A42820", "#9B110E", "#550307", "#CB2314", "#F2300F", "#C93312", "#EF5703", "#F11B00", "#FF0000", "#B40F20", "#972D15", "#FD6467", "#5B1A18", "#BD3027", "#C52E19")
-wes_blues <- c("#273046", "#899DA4", "#35274A", "#3B9AB2", "#78B7C5", "#3A9AB2", "#6FB2C1", "#91BAB6", "#5BBCD6", "#046C9A", "#ABDDDE", "#46ACC8", "#85D4E3", "#7294D4", "#90D4CC", "#7FC0C6", "#0A9F9D", "#5785C1")
-
-
-figure1b <-
-  ggplot(df.biplotd1, 
-         aes (x = estimate, 
-              y = sloped1$slope, xmin = conf.low, 
-              xmax = conf.high,  
-              ymin = sloped1$slope.low, 
-              ymax = sloped1$slope.high, 
-              fill = level, color = level)) + 
-  geom_hline(yintercept = 0, color = "gray85", size=0.75) +
-  geom_vline(xintercept = 0, color = "gray85", size=0.75) +
-  geom_errorbar(size=0.5, alpha = 0.3) + 
-  geom_errorbarh(size=0.5, alpha = 0.3) + 
-  geom_point(size = 1.5, shape = 21, alpha = 1.0, stroke = 0.8) +
-  labs(x = "Conditional mode (random intercept)",
-       y = "Conditional mode (random slope)", 
-       color = "Site-year", fill = "Site-year") + 
-
-  theme_light () + 
-  scale_color_manual(values = c("#68180D","#68180D", #ar
-                                "#266B7E", "#266B7E", "#266B7E", "#266B7E", #de
-                                "#A18902", "#A18902", "#A18902", "#A18902",#il
-                                "#68180D", "#68180D", "#68180D", #la
-                                "#244D51", "#244D51", "#244D51", #md
-                                "#AE8224", "#AE8224","#AE8224","#AE8224", #mn
-                                "#AE8224", "#AE8224","#AE8224","#AE8224", #mo
-                                "#68180D","#68180D","#68180D", #nc
-                                "#9D8206","#9D8206", "#9D8206", "#9D8206", #ne
-                                "#3F1309",  "#3F1309","#3F1309","#3F1309", #tx
-                                "#266B7E", "#266B7E", "#266B7E", "#266B7E"))+ #va
-  scale_fill_manual(values = c("#B40F20","#B40F20",                            #arkansas
-                               "#7294D4", "#7294D4", "#7294D4", "#7294D4",    # delaware
-                                "#FAD510", "#FAD510", "#FAD510",  "#FAD510",  # illinois
-                                "#C52E19", "#C52E19", "#C52E19",               #louisiana
-                                "#046C9A", "#046C9A", "#046C9A",              #maryland
-                                "#F3DF6C", "#F3DF6C","#F3DF6C","#F3DF6C",     #minnesota
-                                "#FBA72A", "#FBA72A","#FBA72A",  "#FBA72A",    #missouri
-                                "#F11B00","#F11B00","#F11B00",                 #north carolina
-                                "#CEAB07","#CEAB07", "#CEAB07", "#CEAB07",    #nebraska
-                                "#972D15", "#972D15", "#972D15", "#972D15",   # texas
-                                "#85D4E3", "#85D4E3", "#85D4E3", "#85D4E3")) + #virginia
-  theme(
-       axis.text.x = element_text(size=10), 
-        axis.text.y = element_text(size=10),
-        axis.title.y = element_text(size=10), 
-        axis.title.x = element_text(size=10),
-       legend.position = "none",
-       legend.spacing.x = unit(5, "pt"),
-       legend.text = element_text(size = 7),
-       legend.title = element_text(size = 8),
-       legend.key.size = unit(0.5, "cm"),
-       legend.key.spacing.y = unit(0, "pt"),
-       legend.box.margin = margin(-5, -5, -5, -5))+
-  guides(col = guide_legend(nrow = 6, byrow = TRUE, title.position = "top", title.hjust = 0.5))
- 
-figure1b
-
-#save to make it look really pretty
-ggsave("figure1b.png", width = 6, height = 2.5, units = "in", dpi = 300)
-
-```
-
-## Figure 1 states
 
 
 ```{r}
@@ -594,8 +449,89 @@ yearmax <- ggplot(state_year_summary,
 
 
 yearmax
-ggsave("yearaverages.png", width = 3.5, height = 3.5, units = "in", dpi = 300)
+#ggsave("yearaverages.png", width = 3.5, height = 3.5, units = "in", dpi = 300)
 ```
+
+
+## Figure 2 
+
+```{r}
+rd1 <- broom.mixed::tidy(mod1, effects = "ran_vals", conf.int = TRUE, response = TRUE)
+rd1 <- as.data.frame(rd1) 
+interceptd1 <- subset(rd1, term == "(Intercept)")
+sloped1 <- subset(rd1, term == "DPP_sc")
+sloped1$slope <- sloped1$estimate
+sloped1$slope.low <- sloped1$conf.low
+sloped1$slope.high <- sloped1$conf.high
+df.biplotd1 <- cbind(interceptd1, sloped1$slope, sloped1$slope.low, sloped1$slope.high)
+df.biplotd1 <- as.data.frame(df.biplotd1)
+
+wes_yellows <- c("#FAD510", "#E1BD6D", "#9A8822", "#EBCC2A", "#E1AF00", "#E3B710", "#F2AD00", "#FDD262", "#E2D200", "#F3DF6C", "#CEAB07", "#FAD77B", "#FBA72A")
+wes_reds <- c("#A42820", "#9B110E", "#550307", "#CB2314", "#F2300F", "#C93312", "#EF5703", "#F11B00", "#FF0000", "#B40F20", "#972D15", "#FD6467", "#5B1A18", "#BD3027", "#C52E19")
+wes_blues <- c("#273046", "#899DA4", "#35274A", "#3B9AB2", "#78B7C5", "#3A9AB2", "#6FB2C1", "#91BAB6", "#5BBCD6", "#046C9A", "#ABDDDE", "#46ACC8", "#85D4E3", "#7294D4", "#90D4CC", "#7FC0C6", "#0A9F9D", "#5785C1")
+
+
+figure1b <-
+  ggplot(df.biplotd1, 
+         aes (x = estimate, 
+              y = sloped1$slope, xmin = conf.low, 
+              xmax = conf.high,  
+              ymin = sloped1$slope.low, 
+              ymax = sloped1$slope.high, 
+              fill = level, color = level)) + 
+  geom_hline(yintercept = 0, color = "gray85", size=0.75) +
+  geom_vline(xintercept = 0, color = "gray85", size=0.75) +
+  geom_errorbar(size=0.5, alpha = 0.3) + 
+  geom_errorbarh(size=0.5, alpha = 0.3) + 
+  geom_point(size = 1.5, shape = 21, alpha = 1.0, stroke = 0.8) +
+  labs(x = "Conditional mode (random intercept)",
+       y = "Conditional mode (random slope)", 
+       color = "Site-year", fill = "Site-year") + 
+
+  theme_light () + 
+  scale_color_manual(values = c("#68180D","#68180D", #ar
+                                "#266B7E", "#266B7E", "#266B7E", "#266B7E", #de
+                                "#A18902", "#A18902", "#A18902", "#A18902",#il
+                                "#68180D", "#68180D", "#68180D", #la
+                                "#244D51", "#244D51", "#244D51", #md
+                                "#AE8224", "#AE8224","#AE8224","#AE8224", #mn
+                                "#AE8224", "#AE8224","#AE8224","#AE8224", #mo
+                                "#68180D","#68180D","#68180D", #nc
+                                "#9D8206","#9D8206", "#9D8206", "#9D8206", #ne
+                                "#3F1309",  "#3F1309","#3F1309","#3F1309", #tx
+                                "#266B7E", "#266B7E", "#266B7E", "#266B7E"))+ #va
+  scale_fill_manual(values = c("#B40F20","#B40F20",                            #arkansas
+                               "#7294D4", "#7294D4", "#7294D4", "#7294D4",    # delaware
+                                "#FAD510", "#FAD510", "#FAD510",  "#FAD510",  # illinois
+                                "#C52E19", "#C52E19", "#C52E19",               #louisiana
+                                "#046C9A", "#046C9A", "#046C9A",              #maryland
+                                "#F3DF6C", "#F3DF6C","#F3DF6C","#F3DF6C",     #minnesota
+                                "#FBA72A", "#FBA72A","#FBA72A",  "#FBA72A",    #missouri
+                                "#F11B00","#F11B00","#F11B00",                 #north carolina
+                                "#CEAB07","#CEAB07", "#CEAB07", "#CEAB07",    #nebraska
+                                "#972D15", "#972D15", "#972D15", "#972D15",   # texas
+                                "#85D4E3", "#85D4E3", "#85D4E3", "#85D4E3")) + #virginia
+  theme(
+       axis.text.x = element_text(size=10), 
+        axis.text.y = element_text(size=10),
+        axis.title.y = element_text(size=10), 
+        axis.title.x = element_text(size=10),
+       legend.position = "none",
+       legend.spacing.x = unit(5, "pt"),
+       legend.text = element_text(size = 7),
+       legend.title = element_text(size = 8),
+       legend.key.size = unit(0.5, "cm"),
+       legend.key.spacing.y = unit(0, "pt"),
+       legend.box.margin = margin(-5, -5, -5, -5))+
+  guides(col = guide_legend(nrow = 6, byrow = TRUE, title.position = "top", title.hjust = 0.5))
+ 
+figure1b
+
+#save to make it look really pretty
+#ggsave("figure1b.png", width = 6, height = 2.5, units = "in", dpi = 300)
+
+```
+
 
 
 
@@ -683,13 +619,13 @@ figure1a
 figure1 <- ggarrange(figure1a, figure1b)
 figure1
 
-#work out some save details 
-ggsave("figure1.png", width = 6, height = 2.5, units = "in", dpi = 300)
+
+#ggsave("figure1.png", width = 6, height = 2.5, units = "in", dpi = 300)
 ```
 
+## lilly check this
 
-
-## Resetting everything without the yucky site years
+Resetting everything without the yucky site years
 
 Weed density mid-season
 
